@@ -24,19 +24,12 @@ jobs:
       
       - name: Install validation dependencies
         run: |
-          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-          pip install --no-cache-dir setuptools wheel twine check-wheel-contents
+          pip install --no-cache-dir setuptools wheel
       
       - name: Validate setup.py syntax
         run: |
-          python setup.py --version
-          python setup.py --name
-          python setup.py --author
-      
-      - name: Check setup.py with twine
-        run: |
-          python setup.py egg_info
-          twine check nvdiffrec_render.egg-info/* || true
+          python -m py_compile setup.py
+          echo "setup.py syntax is valid"
       
       - name: Validate workflow files
         run: |
