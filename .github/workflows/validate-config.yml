@@ -24,6 +24,7 @@ jobs:
       
       - name: Install validation dependencies
         run: |
+          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
           pip install --no-cache-dir setuptools wheel twine check-wheel-contents
       
       - name: Validate setup.py syntax
