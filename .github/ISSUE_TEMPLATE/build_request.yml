@@ -1,0 +1,57 @@
+name: Build Request
+description: Request a new wheel configuration (CUDA/PyTorch/Python version)
+title: "[Build Request]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Request a new wheel build for a specific CUDA, PyTorch, or Python version combination.
+  
+  - type: input
+    id: cuda-version
+    attributes:
+      label: CUDA Version
+      description: Which CUDA version do you need?
+      placeholder: "e.g., 12.8"
+    validations:
+      required: true
+  
+  - type: input
+    id: pytorch-version
+    attributes:
+      label: PyTorch Version
+      description: Which PyTorch version do you need?
+      placeholder: "e.g., 2.9.1"
+    validations:
+      required: true
+  
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version(s)
+      description: Which Python version(s) do you need?
+      placeholder: "e.g., 3.12, 3.13"
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Which platform do you need the wheel for?
+      multiple: true
+      options:
+        - Linux
+        - Windows
+    validations:
+      required: true
+  
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Briefly describe why you need this specific configuration
+      placeholder: "e.g., Latest PyTorch release, compatibility with project dependencies, etc."
+    validations:
+      required: true

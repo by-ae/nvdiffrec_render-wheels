@@ -1,0 +1,92 @@
+name: Bug Report
+description: Report a problem with nvdiffrec_render wheels
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Please fill out the information below to help us diagnose the problem.
+  
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: What operating system are you using?
+      options:
+        - Linux
+        - Windows
+    validations:
+      required: true
+  
+  - type: input
+    id: cuda-version
+    attributes:
+      label: CUDA Version
+      description: Run `nvcc --version` or `python -c "import torch; print(torch.version.cuda)"`
+      placeholder: "e.g., 12.6"
+    validations:
+      required: true
+  
+  - type: input
+    id: pytorch-version
+    attributes:
+      label: PyTorch Version
+      description: Run `python -c "import torch; print(torch.__version__)"`
+      placeholder: "e.g., 2.8.0+cu126"
+    validations:
+      required: true
+  
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: Run `python --version`
+      placeholder: "e.g., 3.12"
+    validations:
+      required: true
+  
+  - type: input
+    id: wheel-filename
+    attributes:
+      label: Wheel Filename
+      description: The exact name of the wheel file you installed
+      placeholder: "e.g., nvdiffrec_render-0.0.1+cu126torch28-cp312-cp312-linux_x86_64.whl"
+    validations:
+      required: false
+  
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the issue you encountered
+      placeholder: Tell us what you see!
+    validations:
+      required: true
+  
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal code or commands to reproduce the issue
+      placeholder: |
+        1. Install wheel with: pip install ...
+        2. Run: python -c "..."
+        3. See error: ...
+    validations:
+      required: true
+  
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error logs
+      description: Paste any relevant error messages or stack traces
+      render: shell
