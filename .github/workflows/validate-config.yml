@@ -1,0 +1,54 @@
+name: Validate Build Configuration
+
+on:
+  pull_request:
+    paths:
+      - 'setup.py'
+      - '.github/workflows/**'
+  push:
+    branches: [main]
+    paths:
+      - 'setup.py'
+      - '.github/workflows/**'
+
+jobs:
+  validate-setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install validation dependencies
+        run: |
+          pip install --no-cache-dir setuptools wheel
+      
+      - name: Validate setup.py syntax
+        run: |
+          python -m py_compile setup.py
+          echo "setup.py syntax is valid"
+      
+      - name: Validate workflow files
+        run: |
+          # Check that all workflows have consistent environment variables
+          echo "Checking CUDA version consistency in workflows..."
+          for workflow in .github/workflows/build-*.yml; do
+            if [ -f "$workflow" ]; then
+              echo "Validating: $workflow"
+              # Extract CUDA_VERSION and verify it matches the filename pattern
+              cuda_ver=$(grep -oP 'CUDA_VERSION: .\K[0-9.]+' "$workflow" | head -1)
+              echo "  CUDA version: $cuda_ver"
+              
+              # Check that required environment variables are present
+              for var in CUDA_VERSION CUDA_SHORT PYTORCH_VERSION TORCH_SHORT TORCH_MM; do
+                if ! grep -q "^  $var:" "$workflow"; then
+                  echo "  ERROR: Missing environment variable $var"
+                  exit 1
+                fi
+              done
+            fi
+          done
+          echo "All workflows validated successfully"

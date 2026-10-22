@@ -143,7 +143,7 @@ jobs:
         shell: powershell
         run: |
           $installerUrl = "https://developer.download.nvidia.com/compute/cuda/12.4.1/network_installers/cuda_12.4.1_windows_network.exe"
-          Write-Host "Downloading CUDA 12.8 network installer..."
+          Write-Host "Downloading CUDA 12.4 network installer..."
           Invoke-WebRequest -Uri $installerUrl -OutFile "cuda_installer.exe" -UseBasicParsing
 
       - name: Install CUDA toolkit
@@ -269,7 +269,7 @@ jobs:
             **Install:**
             ```bash
             pip install nvdiffrec_render \
-              --find-links https://pozzettiandrea.github.io/nvdiffrec_render-wheels/cu${{ env.CUDA_SHORT }}-torch${{ env.TORCH_SHORT }}/
+              --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu${{ env.CUDA_SHORT }}-torch${{ env.TORCH_SHORT }}/
             ```
 
             **Supported:**
@@ -316,7 +316,7 @@ jobs:
           <h1>nvdiffrec_render Wheels</h1>
           <p><strong>CUDA ${{ env.CUDA_VERSION }} + PyTorch ${{ env.PYTORCH_VERSION }}</strong></p>
           <h2>Install</h2>
-          <pre>pip install nvdiffrec_render --find-links https://pozzettiandrea.github.io/nvdiffrec_render-wheels/cu${{ env.CUDA_SHORT }}-torch${{ env.TORCH_SHORT }}/</pre>
+          <pre>pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu${{ env.CUDA_SHORT }}-torch${{ env.TORCH_SHORT }}/</pre>
           <h2>Available Wheels</h2>
           HEADER
 
