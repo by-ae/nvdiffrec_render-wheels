@@ -22,8 +22,8 @@ setup(
     version='0.0.1',
     description='Render utilities from NVlabs/nvdiffrec for differentiable rendering',
     long_description='Pre-built CUDA extensions for nvdiffrec rendering utilities including differentiable mesh operations, BSDF functions, and cubemap handling. Extracted from NVIDIA nvdiffrec for standalone use.',
-    author='NVIDIA Corporation (original), Andrea Pozzetti (packaging)',
-    url='https://github.com/PozzettiAndrea/nvdiffrec_render-wheels',
+    author='NVIDIA Corporation (original), by-ae (packaging)',
+    url='https://github.com/by-ae/nvdiffrec_render-wheels',
     license='NVIDIA Source Code License',
     packages=find_packages(),
     package_data={

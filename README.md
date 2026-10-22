@@ -12,7 +12,7 @@ Pre-built Python wheels for `nvdiffrec_render` (rendering utilities from [NVlabs
 ## Install
 
 ```bash
-pip install nvdiffrec_render --find-links https://PozzettiAndrea.github.io/nvdiffrec_render-wheels/
+pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/
 ```
 
 ## Supported Configurations
@@ -46,7 +46,7 @@ The rendering utilities require GPU memory. Reduce batch sizes or texture resolu
 
 Specify the exact configuration if auto-detection fails:
 ```bash
-pip install nvdiffrec_render --find-links https://PozzettiAndrea.github.io/nvdiffrec_render-wheels/cu126-torch280/
+pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu126-torch280/
 ```
 
 ## Building Manually
