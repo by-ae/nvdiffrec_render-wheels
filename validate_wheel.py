@@ -30,13 +30,13 @@ def validate_wheel(wheel_path):
             has_wheel_metadata = any('WHEEL' in f for f in files)
             
             if not has_c_extension:
-                errors.append("Missing compiled extension (.so/.pyd)")
+                errors.append("Missing compiled extension (.so/.pyd) - the wheel must include compiled CUDA code")
             
             if not has_metadata:
-                errors.append("Missing METADATA file")
+                errors.append("Missing METADATA file - wheel package metadata is incomplete")
             
             if not has_wheel_metadata:
-                errors.append("Missing WHEEL file")
+                errors.append("Missing WHEEL file - wheel format metadata is incomplete")
             
             # Check wheel filename format
             wheel_name = os.path.basename(wheel_path)
@@ -52,13 +52,13 @@ def validate_wheel(wheel_path):
                     cuda_ver = cuda_match.group(1)
                     print(f"  CUDA version tag: {cuda_ver}")
                 else:
-                    warnings.append("CUDA version tag not found in filename")
+                    warnings.append("CUDA version tag not found in filename (expected format: +cuXXX)")
                 
                 if torch_match:
                     torch_ver = torch_match.group(1)
                     print(f"  PyTorch version tag: {torch_ver}")
                 else:
-                    warnings.append("PyTorch version tag not found in filename")
+                    warnings.append("PyTorch version tag not found in filename (expected format: torchXX)")
             
             # Check for expected package structure
             expected_paths = [
@@ -68,25 +68,30 @@ def validate_wheel(wheel_path):
             
             for expected in expected_paths:
                 if not any(f.startswith(expected) for f in files):
-                    errors.append(f"Missing expected path: {expected}")
+                    errors.append(f"Missing expected directory structure: {expected}")
             
             # Verify METADATA content
+            metadata_found = False
             for fname in files:
                 if fname.endswith('METADATA'):
                     metadata = zf.read(fname).decode('utf-8')
                     if 'Name: nvdiffrec_render' not in metadata:
-                        errors.append("METADATA missing package name")
+                        errors.append("METADATA missing package name 'nvdiffrec_render'")
                     if 'Version:' not in metadata:
-                        errors.append("METADATA missing version")
-                    print(f"  Package metadata found")
+                        errors.append("METADATA missing Version field")
+                    metadata_found = True
+                    print(f"  Package metadata validated")
                     break
+            
+            if not metadata_found:
+                errors.append("Could not locate METADATA file in wheel")
             
             print(f"  Total files in wheel: {len(files)}")
             
     except zipfile.BadZipFile:
-        errors.append("Invalid wheel file (corrupt zip)")
+        errors.append("Invalid wheel file (corrupt zip) - try rebuilding the wheel")
     except Exception as e:
-        errors.append(f"Unexpected error: {e}")
+        errors.append(f"Unexpected error during validation: {e}")
     
     return errors, warnings
 

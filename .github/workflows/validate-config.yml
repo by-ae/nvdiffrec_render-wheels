@@ -5,11 +5,15 @@ on:
     paths:
       - 'setup.py'
       - '.github/workflows/**'
+      - 'wheels/**/*.html'
+      - 'validate_index.py'
   push:
     branches: [main]
     paths:
       - 'setup.py'
       - '.github/workflows/**'
+      - 'wheels/**/*.html'
+      - 'validate_index.py'
 
 jobs:
   validate-setup:
@@ -30,6 +34,14 @@ jobs:
         run: |
           python -m py_compile setup.py
           echo "setup.py syntax is valid"
+      
+      - name: Validate index HTML files
+        run: |
+          python validate_index.py wheels/
+      
+      - name: Test index validator
+        run: |
+          python test_validate_index.py
       
       - name: Validate workflow files
         run: |
