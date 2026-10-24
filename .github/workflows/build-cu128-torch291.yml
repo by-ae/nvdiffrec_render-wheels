@@ -3,7 +3,11 @@ name: Build CUDA 12.8 + PyTorch 2.9.1
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    paths:
+      - '.github/workflows/build-cu12-torch*.yml'
+      - 'setup.py'
+      - 'nvdiffrec_render/**'
+  tags: ['v*']
   workflow_dispatch:
 
 env:
@@ -110,11 +114,10 @@ jobs:
           export FORCE_CUDA=1
           export TORCH_CUDA_ARCH_LIST="${{ env.TORCH_CUDA_ARCH_LIST }}"
           export CXXFLAGS="-D_GLIBCXX_USE_CXX11_ABI=1"
+          export NVDIFFREC_LOCAL_VERSION="cu${{ env.CUDA_SHORT }}torch${{ env.TORCH_MM }}"
           cd nvdiffrec_render_pkg
           pip install --no-build-isolation .
           python setup.py bdist_wheel
-          # Rename wheel with CUDA+PyTorch suffix
-          cd dist && for f in *.whl; do mv "$f" "$(echo $f | sed 's/-cp/+cu${{ env.CUDA_SHORT }}torch${{ env.TORCH_MM }}-cp/')"; done && cd ..
           ls -la dist/
 
       - name: Upload wheel
@@ -232,19 +235,10 @@ jobs:
           set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8"
           set FORCE_CUDA=1
           set TORCH_CUDA_ARCH_LIST=7.5;8.6;8.9;9.0;10.0;12.0
+          set NVDIFFREC_LOCAL_VERSION=cu${{ env.CUDA_SHORT }}torch${{ env.TORCH_MM }}
           pip install --no-build-isolation .
           python setup.py bdist_wheel
           dir dist
-
-      - name: Rename wheel with CUDA+PyTorch suffix
-        shell: powershell
-        run: |
-          cd nvdiffrec_render_pkg\dist
-          Get-ChildItem *.whl | ForEach-Object {
-            $newname = $_.Name -replace '-cp', '+cu${{ env.CUDA_SHORT }}torch${{ env.TORCH_MM }}-cp'
-            Rename-Item $_.FullName $newname
-          }
-          Get-ChildItem
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
@@ -357,3 +351,9 @@ jobs:
           git commit -m "Update index: CUDA ${{ env.CUDA_VERSION }} + PyTorch ${{ env.PYTORCH_VERSION }}" || echo "No changes"
           git pull --rebase origin main || true
           git push
+
+      - name: Trigger Pages deployment
+        run: |
+          gh workflow run deploy-pages.yml
+        env:
+          GH_TOKEN: ${{ github.token }}

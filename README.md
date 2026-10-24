@@ -13,11 +13,13 @@ Pre-built Python wheels for `nvdiffrec_render` (rendering utilities from [NVlabs
 
 ### Quick Install (Auto-Detect)
 
+If you already have PyTorch installed, pip can usually auto-detect your configuration:
+
 ```bash
 pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/
 ```
 
-This works if you have PyTorch already installed and pip can auto-detect your CUDA version. If you get "no matching distribution found", use a specific configuration below.
+**Note:** This works best if your CUDA and PyTorch versions match one of the available configurations below. If you get "no matching distribution found", use a specific configuration URL instead.
 
 ### Install Specific Configuration
 
