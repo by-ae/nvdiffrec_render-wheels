@@ -11,10 +11,10 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/build-cu13-torch*.yml'
+      - '.github/workflows/build-cu*-torch*.yml'
       - 'setup.py'
       - 'nvdiffrec_render/**'
-  tags: ['v*']
+    tags: ['v*']
   workflow_dispatch:
 
 env:

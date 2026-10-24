@@ -4,10 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/build-cu126-torch260.yml'
+      - '.github/workflows/build-cu*-torch*.yml'
       - 'setup.py'
       - 'nvdiffrec_render/**'
-  tags: ['v*']
+    tags: ['v*']
+    tags: ['v*']
   workflow_dispatch:
 
 env:
@@ -279,6 +280,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
+      actions: write
 
     steps:
       - uses: actions/checkout@v4
