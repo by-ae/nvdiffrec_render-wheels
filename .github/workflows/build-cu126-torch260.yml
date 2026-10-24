@@ -8,7 +8,6 @@ on:
       - 'setup.py'
       - 'nvdiffrec_render/**'
     tags: ['v*']
-    tags: ['v*']
   workflow_dispatch:
 
 env:
@@ -280,7 +279,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write
       actions: write
 
     steps:
