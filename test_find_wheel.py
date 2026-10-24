@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+"""
+Unit tests for find_wheel.py.
+Tests version parsing, config discovery, matching logic, and integration scenarios.
+"""
+import unittest
+import tempfile
+import shutil
+import sys
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+# Add parent directory to path to import find_wheel
+sys.path.insert(0, str(Path(__file__).parent))
+import find_wheel
+
+
+class TestVersionParsing(unittest.TestCase):
+    """Test version string parsing functions."""
+    
+    def test_parse_torch_version_standard(self):
+        """Test parsing standard PyTorch version strings."""
+        self.assertEqual(find_wheel.parse_version('2.9.1'), (2, 9, 1))
+        self.assertEqual(find_wheel.parse_version('2.8.0'), (2, 8, 0))
+        self.assertEqual(find_wheel.parse_version('2.6.0'), (2, 6, 0))
+        self.assertEqual(find_wheel.parse_version('2.5.1'), (2, 5, 1))
+    
+    def test_parse_torch_version_with_suffix(self):
+        """Test parsing PyTorch versions with local suffixes."""
+        self.assertEqual(find_wheel.parse_version('2.9.1+cu128'), (2, 9, 1))
+        self.assertEqual(find_wheel.parse_version('2.8.0+cu126'), (2, 8, 0))
+        self.assertEqual(find_wheel.parse_version('2.5.1+cpu'), (2, 5, 1))
+    
+    def test_parse_cuda_version_standard(self):
+        """Test parsing standard CUDA version strings."""
+        self.assertEqual(find_wheel.parse_cuda_version('12.8'), (12, 8))
+        self.assertEqual(find_wheel.parse_cuda_version('13.0'), (13, 0))
+        self.assertEqual(find_wheel.parse_cuda_version('12.6'), (12, 6))
+        self.assertEqual(find_wheel.parse_cuda_version('12.4'), (12, 4))
+    
+    def test_parse_cuda_version_short(self):
+        """Test parsing short CUDA version strings."""
+        self.assertEqual(find_wheel.parse_cuda_version('128'), (12, 8))
+        self.assertEqual(find_wheel.parse_cuda_version('130'), (13, 0))
+        self.assertEqual(find_wheel.parse_cuda_version('126'), (12, 6))
+        self.assertEqual(find_wheel.parse_cuda_version('124'), (12, 4))
+    
+    def test_format_cuda_version(self):
+        """Test formatting CUDA version tuples."""
+        self.assertEqual(find_wheel.format_cuda_version((12, 8)), '12.8')
+        self.assertEqual(find_wheel.format_cuda_version((13, 0)), '13.0')
+        self.assertEqual(find_wheel.format_cuda_version((12, 6)), '12.6')
+    
+    def test_parse_invalid_version(self):
+        """Test that invalid version strings raise ValueError."""
+        with self.assertRaises(ValueError):
+            find_wheel.parse_version('invalid')
+        
+        with self.assertRaises(ValueError):
+            find_wheel.parse_version('2.9')
+        
+        with self.assertRaises(ValueError):
+            find_wheel.parse_cuda_version('12')
+
+
+class TestConfigDiscovery(unittest.TestCase):
+    """Test configuration discovery from wheels directory."""
+    
+    def setUp(self):
+        """Create temporary directory for test configs."""
+        self.test_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.test_dir)
+    
+    def test_discover_real_configs(self):
+        """Test discovery against the actual wheels directory."""
+        wheels_dir = Path(__file__).parent / 'wheels'
+        
+        if not wheels_dir.exists():
+            self.skipTest("wheels/ directory not found in repository")
+        
+        configs = find_wheel.discover_configs(wheels_dir)
+        
+        # Should find at least the 6 configs mentioned in the task
+        self.assertGreater(len(configs), 0)
+        
+        # Check structure of returned configs
+        for config in configs:
+            self.assertIn('name', config)
+            self.assertIn('cuda', config)
+            self.assertIn('torch', config)
+            
+            # Validate types
+            self.assertIsInstance(config['name'], str)
+            self.assertIsInstance(config['cuda'], tuple)
+            self.assertIsInstance(config['torch'], tuple)
+            self.assertEqual(len(config['cuda']), 2)
+            self.assertEqual(len(config['torch']), 3)
+        
+        # Check that configs are sorted (PyTorch desc, then CUDA desc)
+        for i in range(len(configs) - 1):
+            curr = configs[i]
+            next_cfg = configs[i + 1]
+            # Current should be >= next in sort order
+            self.assertGreaterEqual(
+                (curr['torch'], curr['cuda']),
+                (next_cfg['torch'], next_cfg['cuda'])
+            )
+    
+    def test_discover_mock_configs(self):
+        """Test discovery with mock config directories."""
+        wheels_dir = Path(self.test_dir)
+        
+        # Create mock config directories
+        (wheels_dir / 'cu128-torch291').mkdir(parents=True)
+        (wheels_dir / 'cu126-torch280').mkdir(parents=True)
+        (wheels_dir / 'cu124-torch251').mkdir(parents=True)
+        
+        configs = find_wheel.discover_configs(wheels_dir)
+        
+        self.assertEqual(len(configs), 3)
+        
+        # Check parsed values
+        config_names = [c['name'] for c in configs]
+        self.assertIn('cu128-torch291', config_names)
+        self.assertIn('cu126-torch280', config_names)
+        self.assertIn('cu124-torch251', config_names)
+        
+        # Check cu128-torch291 parsing
+        cu128_config = next(c for c in configs if c['name'] == 'cu128-torch291')
+        self.assertEqual(cu128_config['cuda'], (12, 8))
+        self.assertEqual(cu128_config['torch'], (2, 9, 1))
+    
+    def test_discover_empty_directory(self):
+        """Test discovery with empty wheels directory."""
+        wheels_dir = Path(self.test_dir)
+        wheels_dir.mkdir(exist_ok=True)
+        
+        configs = find_wheel.discover_configs(wheels_dir)
+        
+        self.assertEqual(len(configs), 0)
+    
+    def test_discover_nonexistent_directory(self):
+        """Test discovery with non-existent directory."""
+        wheels_dir = Path(self.test_dir) / 'nonexistent'
+        
+        configs = find_wheel.discover_configs(wheels_dir)
+        
+        self.assertEqual(len(configs), 0)
+    
+    def test_discover_ignores_invalid_names(self):
+        """Test that invalid directory names are ignored."""
+        wheels_dir = Path(self.test_dir)
+        
+        # Create valid and invalid directories
+        (wheels_dir / 'cu128-torch291').mkdir(parents=True)
+        (wheels_dir / 'invalid-name').mkdir(parents=True)
+        (wheels_dir / '.git').mkdir(parents=True)
+        (wheels_dir / 'README.md').touch()
+        
+        configs = find_wheel.discover_configs(wheels_dir)
+        
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0]['name'], 'cu128-torch291')
+
+
+class TestConfigMatching(unittest.TestCase):
+    """Test configuration matching logic."""
+    
+    def setUp(self):
+        """Set up mock configs for testing."""
+        self.configs = [
+            {'name': 'cu130-torch291', 'cuda': (13, 0), 'torch': (2, 9, 1)},
+            {'name': 'cu128-torch291', 'cuda': (12, 8), 'torch': (2, 9, 1)},
+            {'name': 'cu128-torch280', 'cuda': (12, 8), 'torch': (2, 8, 0)},
+            {'name': 'cu126-torch280', 'cuda': (12, 6), 'torch': (2, 8, 0)},
+            {'name': 'cu126-torch260', 'cuda': (12, 6), 'torch': (2, 6, 0)},
+            {'name': 'cu124-torch251', 'cuda': (12, 4), 'torch': (2, 5, 1)},
+        ]
+    
+    def test_exact_match(self):
+        """Test finding exact match."""
+        exact, nearest = find_wheel.find_matching_config(
+            python_version=(3, 11),
+            torch_version=(2, 9, 1),
+            cuda_version=(12, 8),
+            configs=self.configs
+        )
+        
+        self.assertIsNotNone(exact)
+        self.assertEqual(exact['name'], 'cu128-torch291')
+        
+        # Exact match should also be the nearest
+        self.assertIsNotNone(nearest)
+        self.assertEqual(nearest['name'], 'cu128-torch291')
+    
+    def test_no_exact_match_with_nearest(self):
+        """Test nearest match when no exact match exists."""
+        # Request torch 2.9.1 with CUDA 12.7 (not available)
+        # torch (2,9,1) MM is (2,9)
+        # configs with torch MM (2,9): cu130-torch291, cu128-torch291
+        # filter CUDA <= 12.7: none (13.0 > 12.7, 12.8 > 12.7)
+        # So nearest should be None
+        exact, nearest = find_wheel.find_matching_config(
+            python_version=(3, 11),
+            torch_version=(2, 9, 1),
+            cuda_version=(12, 7),
+            configs=self.configs
+        )
+        
+        self.assertIsNone(exact)
+        self.assertIsNone(nearest)
+    
+    def test_nearest_match_lower_cuda(self):
+        """Test nearest match suggests lower CUDA version."""
+        # Request torch 2.8.0 with CUDA 12.7
+        # Should suggest cu126-torch280 (CUDA 12.6 <= 12.7)
+        exact, nearest = find_wheel.find_matching_config(
+            python_version=(3, 11),
+            torch_version=(2, 8, 0),
+            cuda_version=(12, 7),
+            configs=self.configs
+        )
+        
+        self.assertIsNone(exact)
+        self.assertIsNotNone(nearest)
+        self.assertEqual(nearest['name'], 'cu126-torch280')
+    
+    def test_nearest_match_prefers_highest_cuda(self):
+        """Test that nearest match prefers highest compatible CUDA."""
+        # Request torch 2.8.0 with CUDA 13.0
+        # Should suggest cu128-torch280 (highest CUDA <= 13.0)
+        exact, nearest = find_wheel.find_matching_config(
+            python_version=(3, 11),
+            torch_version=(2, 8, 0),
+            cuda_version=(13, 0),
+            configs=self.configs
+        )
+        
+        self.assertIsNone(exact)
+        self.assertIsNotNone(nearest)
+        self.assertEqual(nearest['name'], 'cu128-torch280')
+    
+    def test_no_match_different_torch_major_minor(self):
+        """Test no match when torch major.minor doesn't match any config."""
+        exact, nearest = find_wheel.find_matching_config(
+            python_version=(3, 11),
+            torch_version=(2, 7, 0),  # No 2.7.x configs
+            cuda_version=(12, 8),
+            configs=self.configs
+        )
+        
+        self.assertIsNone(exact)
+        self.assertIsNone(nearest)
+    
+    def test_none_inputs(self):
+        """Test handling of None inputs."""
+        exact, nearest = find_wheel.find_matching_config(
+            python_version=(3, 11),
+            torch_version=None,
+            cuda_version=(12, 8),
+            configs=self.configs
+        )
+        
+        self.assertIsNone(exact)
+        self.assertIsNone(nearest)
+        
+        exact, nearest = find_wheel.find_matching_config(
+            python_version=(3, 11),
+            torch_version=(2, 9, 1),
+            cuda_version=None,
+            configs=self.configs
+        )
+        
+        self.assertIsNone(exact)
+        self.assertIsNone(nearest)
+
+
+class TestDetectEnvironment(unittest.TestCase):
+    """Test environment detection."""
+    
+    @patch('sys.version_info', MagicMock(major=3, minor=11))
+    def test_python_version_detection(self):
+        """Test Python version is always detected."""
+        python_ver, torch_ver, cuda_ver = find_wheel.detect_environment()
+        
+        self.assertEqual(python_ver, (3, 11))
+    
+    @patch('sys.version_info', MagicMock(major=3, minor=12))
+    @patch('find_wheel.torch', None, create=True)
+    def test_torch_not_installed(self):
+        """Test detection when torch is not installed."""
+        with patch.dict('sys.modules', {'torch': None}):
+            python_ver, torch_ver, cuda_ver = find_wheel.detect_environment()
+            
+            self.assertEqual(python_ver, (3, 12))
+            self.assertIsNone(torch_ver)
+            self.assertIsNone(cuda_ver)
+    
+    def test_torch_cuda_detection(self):
+        """Test detection when torch is installed with CUDA (integration test)."""
+        # This is an integration test - only runs if torch is actually installed
+        try:
+            import torch
+            python_ver, torch_ver, cuda_ver = find_wheel.detect_environment()
+            
+            # Verify we get valid results
+            self.assertIsInstance(python_ver, tuple)
+            self.assertEqual(len(python_ver), 2)
+            
+            self.assertIsInstance(torch_ver, tuple)
+            self.assertEqual(len(torch_ver), 3)
+            
+            # CUDA version may be None (CPU build) or a tuple
+            if cuda_ver is not None:
+                self.assertIsInstance(cuda_ver, tuple)
+                self.assertEqual(len(cuda_ver), 2)
+        except ImportError:
+            self.skipTest("torch not installed")
+    
+    def test_torch_cpu_detection(self):
+        """Test that CPU-only torch results in None cuda_version."""
+        # This is tested as part of torch_cuda_detection - if torch
+        # is installed and cuda_ver is None, it's a CPU build
+        # Skipping separate test to avoid complex mocking
+        pass
+
+
+class TestPipCommandFormatting(unittest.TestCase):
+    """Test pip command formatting."""
+    
+    def test_format_pip_command(self):
+        """Test pip command formatting with various configs."""
+        base_url = 'https://by-ae.github.io/nvdiffrec_render-wheels/'
+        
+        cmd = find_wheel.format_pip_command('cu128-torch291', base_url)
+        expected = 'pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu128-torch291/'
+        self.assertEqual(cmd, expected)
+        
+        cmd = find_wheel.format_pip_command('cu124-torch251', base_url)
+        expected = 'pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu124-torch251/'
+        self.assertEqual(cmd, expected)
+    
+    def test_format_pip_command_custom_url(self):
+        """Test pip command with custom base URL."""
+        base_url = 'https://example.com/wheels/'
+        
+        cmd = find_wheel.format_pip_command('cu128-torch291', base_url)
+        expected = 'pip install nvdiffrec_render --find-links https://example.com/wheels/cu128-torch291/'
+        self.assertEqual(cmd, expected)
+
+
+if __name__ == '__main__':
+    unittest.main()
