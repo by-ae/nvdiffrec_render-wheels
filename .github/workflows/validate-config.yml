@@ -7,6 +7,8 @@ on:
       - '.github/workflows/**'
       - 'wheels/**/*.html'
       - 'validate_index.py'
+      - 'find_wheel.py'
+      - 'test_find_wheel.py'
   push:
     branches: [main]
     paths:
@@ -14,6 +16,8 @@ on:
       - '.github/workflows/**'
       - 'wheels/**/*.html'
       - 'validate_index.py'
+      - 'find_wheel.py'
+      - 'test_find_wheel.py'
 
 jobs:
   validate-setup:
@@ -42,6 +46,10 @@ jobs:
       - name: Test index validator
         run: |
           python test_validate_index.py
+      
+      - name: Test wheel finder
+        run: |
+          python test_find_wheel.py
       
       - name: Validate workflow files
         run: |

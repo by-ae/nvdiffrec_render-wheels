@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""
+Helper script to find the correct nvdiffrec_render wheel for your environment.
+Detects Python version, PyTorch version, and CUDA version, then suggests the
+matching wheel configuration or the nearest available alternative.
+"""
+import sys
+import os
+import re
+import argparse
+from pathlib import Path
+from typing import Optional, Tuple, List
+
+
+def parse_version(version_str: str) -> Tuple[int, int, int]:
+    """
+    Parse a version string like '2.9.1' or '2.9.1+cu128' into (major, minor, patch).
+    Strips local version suffixes (everything after +).
+    """
+    # Strip local version suffix (e.g., +cu128)
+    base_version = version_str.split('+')[0]
+    
+    # Parse major.minor.patch
+    match = re.match(r'^(\d+)\.(\d+)\.(\d+)', base_version)
+    if not match:
+        raise ValueError(f"Invalid version format: {version_str}")
+    
+    major, minor, patch = match.groups()
+    return (int(major), int(minor), int(patch))
+
+
+def parse_cuda_version(cuda_str: str) -> Tuple[int, int]:
+    """
+    Parse CUDA version string like '12.8' or '128' into (major, minor).
+    Returns tuple for comparison.
+    """
+    # Handle short form like '128' (12.8)
+    if '.' not in cuda_str:
+        if len(cuda_str) == 3:  # e.g., '128' -> 12.8
+            major = int(cuda_str[:2])
+            minor = int(cuda_str[2:])
+        elif len(cuda_str) == 4:  # e.g., '1308' -> 13.08 -> 13.8
+            major = int(cuda_str[:2])
+            minor = int(cuda_str[2:])
+        else:
+            raise ValueError(f"Invalid CUDA short version: {cuda_str}")
+    else:
+        # Handle standard form like '12.8'
+        parts = cuda_str.split('.')
+        if len(parts) != 2:
+            raise ValueError(f"Invalid CUDA version format: {cuda_str}")
+        major, minor = int(parts[0]), int(parts[1])
+    
+    return (major, minor)
+
+
+def format_cuda_version(cuda_tuple: Tuple[int, int]) -> str:
+    """Format CUDA tuple (12, 8) as '12.8'."""
+    return f"{cuda_tuple[0]}.{cuda_tuple[1]}"
+
+
+def discover_configs(wheels_dir: Path) -> List[dict]:
+    """
+    Discover available wheel configurations by scanning wheels/*/ directories.
+    Returns list of dicts with 'name', 'cuda', 'torch' keys.
+    
+    Config directory names follow pattern: cu{CUDA_SHORT}-torch{TORCH_SHORT}
+    e.g., cu128-torch291 means CUDA 12.8, PyTorch 2.9.1
+    """
+    configs = []
+    
+    if not wheels_dir.exists():
+        return configs
+    
+    for config_dir in wheels_dir.iterdir():
+        if not config_dir.is_dir() or config_dir.name == '.git':
+            continue
+        
+        # Parse config name: cu{CUDA_SHORT}-torch{TORCH_SHORT}
+        match = re.match(r'^cu(\d+)-torch(\d+)$', config_dir.name)
+        if not match:
+            continue
+        
+        cuda_short, torch_short = match.groups()
+        
+        # Convert short forms to full versions
+        # CUDA: 128 -> (12, 8), 130 -> (13, 0)
+        cuda_tuple = parse_cuda_version(cuda_short)
+        
+        # PyTorch: 291 -> (2, 9, 1), 280 -> (2, 8, 0)
+        if len(torch_short) == 3:
+            torch_tuple = (int(torch_short[0]), int(torch_short[1]), int(torch_short[2]))
+        elif len(torch_short) == 2:
+            torch_tuple = (int(torch_short[0]), int(torch_short[1]), 0)
+        else:
+            continue
+        
+        configs.append({
+            'name': config_dir.name,
+            'cuda': cuda_tuple,
+            'torch': torch_tuple,
+        })
+    
+    # Sort by PyTorch version (descending), then CUDA version (descending)
+    configs.sort(key=lambda c: (c['torch'], c['cuda']), reverse=True)
+    
+    return configs
+
+
+def find_matching_config(python_version: Tuple[int, int], 
+                        torch_version: Optional[Tuple[int, int, int]],
+                        cuda_version: Optional[Tuple[int, int]],
+                        configs: List[dict]) -> Tuple[Optional[dict], Optional[dict]]:
+    """
+    Find the exact matching config or the nearest alternative.
+    
+    Returns: (exact_match, nearest_match)
+    - exact_match: config with exact torch and CUDA match, or None
+    - nearest_match: config with same torch major.minor, highest CUDA <= local, or None
+    """
+    if not torch_version or not cuda_version:
+        return None, None
+    
+    exact_match = None
+    nearest_match = None
+    
+    torch_major_minor = (torch_version[0], torch_version[1])
+    
+    # Find exact match
+    for config in configs:
+        if config['torch'] == torch_version and config['cuda'] == cuda_version:
+            exact_match = config
+            break
+    
+    # Find nearest match (same torch major.minor, highest CUDA <= local)
+    candidates = []
+    for config in configs:
+        config_torch_mm = (config['torch'][0], config['torch'][1])
+        if config_torch_mm == torch_major_minor and config['cuda'] <= cuda_version:
+            candidates.append(config)
+    
+    if candidates:
+        # Pick the one with the highest CUDA version
+        nearest_match = max(candidates, key=lambda c: c['cuda'])
+    
+    return exact_match, nearest_match
+
+
+def detect_environment() -> Tuple[Tuple[int, int], Optional[Tuple[int, int, int]], Optional[Tuple[int, int]]]:
+    """
+    Detect Python version, PyTorch version, and CUDA version from the environment.
+    
+    Returns: (python_version, torch_version, cuda_version)
+    - python_version: always present as (major, minor)
+    - torch_version: (major, minor, patch) or None if torch not installed
+    - cuda_version: (major, minor) or None if torch not installed or CPU-only
+    """
+    python_version = (sys.version_info.major, sys.version_info.minor)
+    
+    torch_version = None
+    cuda_version = None
+    
+    try:
+        import torch
+        torch_version = parse_version(torch.__version__)
+        
+        # Check CUDA availability
+        if torch.version.cuda is not None:
+            cuda_version = parse_cuda_version(torch.version.cuda)
+        
+    except ImportError:
+        pass
+    
+    return python_version, torch_version, cuda_version
+
+
+def format_pip_command(config_name: str, base_url: str) -> str:
+    """Format the pip install command for a given config."""
+    return f"pip install nvdiffrec_render --find-links {base_url}{config_name}/"
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Find the correct nvdiffrec_render wheel for your environment",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Auto-detect from installed PyTorch
+  python find_wheel.py
+  
+  # Override with specific versions
+  python find_wheel.py --torch 2.9.1 --cuda 12.8 --python 3.11
+  
+  # Check compatibility without torch installed
+  python find_wheel.py --torch 2.8.0 --cuda 12.6
+        """
+    )
+    
+    parser.add_argument(
+        '--torch',
+        type=str,
+        help='PyTorch version (e.g., 2.9.1, 2.8.0)'
+    )
+    parser.add_argument(
+        '--cuda',
+        type=str,
+        help='CUDA version (e.g., 12.8, 13.0)'
+    )
+    parser.add_argument(
+        '--python',
+        type=str,
+        help='Python version (e.g., 3.11, 3.12)'
+    )
+    parser.add_argument(
+        '--base-url',
+        type=str,
+        default='https://by-ae.github.io/nvdiffrec_render-wheels/',
+        help='Base URL for wheel index (default: GitHub Pages URL)'
+    )
+    parser.add_argument(
+        '--wheels-dir',
+        type=str,
+        help='Path to wheels directory (default: ./wheels relative to script)'
+    )
+    
+    args = parser.parse_args()
+    
+    # Determine wheels directory
+    if args.wheels_dir:
+        wheels_dir = Path(args.wheels_dir)
+    else:
+        script_dir = Path(__file__).parent
+        wheels_dir = script_dir / 'wheels'
+    
+    # Discover available configurations
+    configs = discover_configs(wheels_dir)
+    
+    if not configs:
+        print("Error: No wheel configurations found.", file=sys.stderr)
+        if wheels_dir.exists():
+            print(f"Checked directory: {wheels_dir}", file=sys.stderr)
+        else:
+            print(f"Directory does not exist: {wheels_dir}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Detect or parse environment
+    python_version, torch_version, cuda_version = detect_environment()
+    
+    # Override with command-line arguments
+    if args.python:
+        parts = args.python.split('.')
+        if len(parts) < 2:
+            print(f"Error: Invalid Python version format: {args.python}", file=sys.stderr)
+            print("Expected format: X.Y (e.g., 3.11)", file=sys.stderr)
+            sys.exit(1)
+        python_version = (int(parts[0]), int(parts[1]))
+    
+    if args.torch:
+        try:
+            torch_version = parse_version(args.torch)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    if args.cuda:
+        try:
+            cuda_version = parse_cuda_version(args.cuda)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Display detected environment
+    print("Detected environment:")
+    print(f"  Python: {python_version[0]}.{python_version[1]}")
+    
+    if torch_version:
+        torch_str = f"{torch_version[0]}.{torch_version[1]}.{torch_version[2]}"
+        print(f"  PyTorch: {torch_str}")
+    else:
+        print("  PyTorch: not installed (use --torch to specify)")
+    
+    if cuda_version:
+        cuda_str = format_cuda_version(cuda_version)
+        print(f"  CUDA: {cuda_str}")
+    elif torch_version:
+        print("  CUDA: CPU-only build detected")
+    
+    print()
+    
+    # Handle CPU-only torch
+    if torch_version and not cuda_version and not args.cuda:
+        print("❌ Your PyTorch installation is CPU-only (no CUDA support).")
+        print()
+        print("nvdiffrec_render requires a CUDA-enabled PyTorch installation.")
+        print()
+        print("To fix this:")
+        print("1. Install PyTorch with CUDA support from https://pytorch.org")
+        print("2. Then run this script again, or use --cuda flag if PyTorch misreports")
+        print()
+        print("Example (CUDA 12.8):")
+        print("  pip install torch --index-url https://download.pytorch.org/whl/cu128")
+        sys.exit(1)
+    
+    # Check if we have enough info to find a wheel
+    if not torch_version:
+        print("Cannot determine wheel without PyTorch version.")
+        print("Either install PyTorch first, or use --torch and --cuda flags.")
+        print()
+        print("Example:")
+        print("  python find_wheel.py --torch 2.9.1 --cuda 12.8")
+        print()
+        print("Available configurations:")
+        for config in configs:
+            cuda_str = format_cuda_version(config['cuda'])
+            torch_str = f"{config['torch'][0]}.{config['torch'][1]}.{config['torch'][2]}"
+            print(f"  {config['name']}: CUDA {cuda_str}, PyTorch {torch_str}")
+        sys.exit(1)
+    
+    if not cuda_version:
+        print("Cannot determine wheel without CUDA version.")
+        print("Use --cuda flag to specify your CUDA version.")
+        print()
+        print("Example:")
+        print(f"  python find_wheel.py --torch {torch_version[0]}.{torch_version[1]}.{torch_version[2]} --cuda 12.8")
+        sys.exit(1)
+    
+    # Find matching configuration
+    exact_match, nearest_match = find_matching_config(
+        python_version, torch_version, cuda_version, configs
+    )
+    
+    if exact_match:
+        print("✅ Found exact match!")
+        print()
+        print("Install command:")
+        print(f"  {format_pip_command(exact_match['name'], args.base_url)}")
+        print()
+        sys.exit(0)
+    
+    # No exact match - suggest nearest or list all
+    print("❌ No exact match found for your configuration.")
+    print()
+    
+    if nearest_match:
+        cuda_str = format_cuda_version(nearest_match['cuda'])
+        torch_str = f"{nearest_match['torch'][0]}.{nearest_match['torch'][1]}.{nearest_match['torch'][2]}"
+        print(f"💡 Nearest match: {nearest_match['name']}")
+        print(f"   CUDA {cuda_str}, PyTorch {torch_str}")
+        print()
+        print("Install command:")
+        print(f"  {format_pip_command(nearest_match['name'], args.base_url)}")
+        print()
+        print("Note: This may work if your CUDA runtime is backward-compatible,")
+        print("but for best results, install PyTorch matching an available config.")
+    
+    print()
+    print("Available configurations:")
+    for config in configs:
+        cuda_str = format_cuda_version(config['cuda'])
+        torch_str = f"{config['torch'][0]}.{config['torch'][1]}.{config['torch'][2]}"
+        print(f"  {config['name']}: CUDA {cuda_str}, PyTorch {torch_str}")
+    
+    print()
+    print("To install PyTorch with a specific CUDA version, visit:")
+    print("  https://pytorch.org")
+    
+    sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

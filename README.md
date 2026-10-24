@@ -53,7 +53,27 @@ pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_rend
 pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu124-torch251/
 ```
 
-### Which Configuration Do I Need?
+### Not Sure Which Wheel?
+
+Use the helper script to automatically detect your configuration and get the correct install command:
+
+```bash
+python find_wheel.py
+```
+
+Or run it directly from the repository without cloning:
+
+```bash
+curl -sL https://raw.githubusercontent.com/by-ae/nvdiffrec_render-wheels/main/find_wheel.py | python
+```
+
+The script auto-detects your Python, PyTorch, and CUDA versions. If PyTorch isn't installed yet, specify your target versions manually:
+
+```bash
+python find_wheel.py --torch 2.9.1 --cuda 12.8 --python 3.11
+```
+
+### Which Configuration Do I Need? (Manual Check)
 
 Check your installed PyTorch and CUDA versions:
 
