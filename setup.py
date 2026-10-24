@@ -17,9 +17,14 @@ cuda_sources = [
     'nvdiffrec_render/renderutils/c_src/torch_bindings.cpp',
 ]
 
+# Version with optional local version identifier from env
+base_version = '0.0.1'
+local_version = os.environ.get('NVDIFFREC_LOCAL_VERSION', '')
+version = f'{base_version}+{local_version}' if local_version else base_version
+
 setup(
     name='nvdiffrec_render',
-    version='0.0.1',
+    version=version,
     description='Render utilities from NVlabs/nvdiffrec for differentiable rendering',
     long_description='Pre-built CUDA extensions for nvdiffrec rendering utilities including differentiable mesh operations, BSDF functions, and cubemap handling. Extracted from NVIDIA nvdiffrec for standalone use.',
     author='NVIDIA Corporation (original), by-ae (packaging)',
