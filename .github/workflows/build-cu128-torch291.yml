@@ -351,3 +351,9 @@ jobs:
           git commit -m "Update index: CUDA ${{ env.CUDA_VERSION }} + PyTorch ${{ env.PYTORCH_VERSION }}" || echo "No changes"
           git pull --rebase origin main || true
           git push
+
+      - name: Trigger Pages deployment
+        run: |
+          gh workflow run deploy-pages.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
