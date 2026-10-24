@@ -50,6 +50,12 @@ def validate_wheel_filename(filename: str) -> Tuple[bool, str]:
     if not filename.startswith('nvdiffrec_render-'):
         return False, f"Does not start with 'nvdiffrec_render-': {filename}"
     
+    # Check for doubled tag pattern (the bug we fixed)
+    # Pattern: +cuXXXtorchYY-cpZZZ+cuXXXtorchYY-cpZZZ (same tag appears twice)
+    doubled_tag_pattern = r'\+cu\d+torch\d+-cp\d+\+cu\d+torch\d+-cp\d+'
+    if re.search(doubled_tag_pattern, filename):
+        return False, f"Contains doubled tag (Windows rename bug): {filename}"
+    
     # Split by '-' and check we have at least 5 parts (name-version-python-abi-platform)
     parts = filename.split('-')
     if len(parts) < 5:

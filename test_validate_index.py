@@ -22,8 +22,8 @@ class TestWheelFilenameValidation(unittest.TestCase):
         """Test that valid wheel names pass validation."""
         valid_names = [
             "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-linux_x86_64.whl",
-            "nvdiffrec_render-0.0.1+cu124torch25-cp312+cu124torch25-cp312-win_amd64.whl",
             "nvdiffrec_render-0.0.1+cu126torch26-cp313-cp313-linux_x86_64.whl",
+            "nvdiffrec_render-0.0.1+cu124torch25-cp312-cp312-win_amd64.whl",
         ]
         
         for name in valid_names:
@@ -38,12 +38,16 @@ class TestWheelFilenameValidation(unittest.TestCase):
             "wrong_package-0.0.1-cp310-cp310-linux_x86_64.whl",
             "nvdiffrec_render-0.0.1.tar.gz",
             "nvdiffrec_render-0.0.1",
+            # Doubled tag bug (the issue we fixed)
+            "nvdiffrec_render-0.0.1+cu126torch26-cp310+cu126torch26-cp310-win_amd64.whl",
         ]
         
         for name in invalid_names:
             with self.subTest(name=name):
                 valid, error = validate_index.validate_wheel_filename(name)
                 self.assertFalse(valid, f"Expected {name} to be invalid but passed")
+                if "doubled tag" in name or "+cu126torch26-cp310+cu126torch26" in name:
+                    self.assertIn("doubled tag", error.lower())
 
 
 class TestIndexHTMLParser(unittest.TestCase):
