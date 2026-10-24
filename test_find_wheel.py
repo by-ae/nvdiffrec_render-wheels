@@ -349,5 +349,168 @@ class TestPipCommandFormatting(unittest.TestCase):
         self.assertEqual(cmd, expected)
 
 
+class TestPythonRangeParsing(unittest.TestCase):
+    """Test Python version range parsing."""
+    
+    def test_parse_python_range_standard(self):
+        """Test parsing standard Python range strings."""
+        result = find_wheel.parse_python_range('3.10-3.13')
+        self.assertEqual(result, ((3, 10), (3, 13)))
+        
+        result = find_wheel.parse_python_range('3.10-3.12')
+        self.assertEqual(result, ((3, 10), (3, 12)))
+    
+    def test_parse_python_range_invalid(self):
+        """Test that invalid ranges return None."""
+        self.assertIsNone(find_wheel.parse_python_range('3.10'))
+        self.assertIsNone(find_wheel.parse_python_range('invalid'))
+        self.assertIsNone(find_wheel.parse_python_range('3.10-3'))
+
+
+class TestParseConfigsFromIndexHTML(unittest.TestCase):
+    """Test parsing configs from index.html."""
+    
+    def test_parse_real_index_html(self):
+        """Test parsing against the real wheels/index.html."""
+        index_path = Path(__file__).parent / 'wheels' / 'index.html'
+        
+        if not index_path.exists():
+            self.skipTest("wheels/index.html not found")
+        
+        with open(index_path, 'r', encoding='utf-8') as f:
+            html = f.read()
+        
+        configs = find_wheel.parse_configs_from_index_html(html)
+        
+        # Should have at least 6 configs
+        self.assertGreaterEqual(len(configs), 6)
+        
+        # Check structure
+        for config in configs:
+            self.assertIn('name', config)
+            self.assertIn('cuda', config)
+            self.assertIn('torch', config)
+            self.assertIsInstance(config['cuda'], tuple)
+            self.assertIsInstance(config['torch'], tuple)
+        
+        # Check cu124-torch251 has Python range 3.10-3.12
+        cu124 = next((c for c in configs if c['name'] == 'cu124-torch251'), None)
+        if cu124:
+            self.assertIn('python_range', cu124)
+            self.assertEqual(cu124['python_range'], ((3, 10), (3, 12)))
+        
+        # Check cu128-torch291 has Python range 3.10-3.13
+        cu128 = next((c for c in configs if c['name'] == 'cu128-torch291'), None)
+        if cu128:
+            self.assertIn('python_range', cu128)
+            self.assertEqual(cu128['python_range'], ((3, 10), (3, 13)))
+    
+    def test_parse_mock_index_html(self):
+        """Test parsing with mock HTML."""
+        html = """
+        <html>
+        <body>
+        <table>
+            <tr><th>CUDA</th><th>PyTorch</th><th>Python</th><th>Link</th></tr>
+            <tr><td>12.8</td><td>2.9.1</td><td>3.10-3.13</td><td><a href="cu128-torch291/">cu128-torch291</a></td></tr>
+            <tr><td>12.4</td><td>2.5.1</td><td>3.10-3.12</td><td><a href="cu124-torch251/">cu124-torch251</a></td></tr>
+        </table>
+        </body>
+        </html>
+        """
+        
+        configs = find_wheel.parse_configs_from_index_html(html)
+        
+        self.assertEqual(len(configs), 2)
+        
+        # Check cu128-torch291
+        cu128 = next((c for c in configs if c['name'] == 'cu128-torch291'), None)
+        self.assertIsNotNone(cu128)
+        self.assertEqual(cu128['cuda'], (12, 8))
+        self.assertEqual(cu128['torch'], (2, 9, 1))
+        self.assertEqual(cu128['python_range'], ((3, 10), (3, 13)))
+        
+        # Check cu124-torch251
+        cu124 = next((c for c in configs if c['name'] == 'cu124-torch251'), None)
+        self.assertIsNotNone(cu124)
+        self.assertEqual(cu124['cuda'], (12, 4))
+        self.assertEqual(cu124['torch'], (2, 5, 1))
+        self.assertEqual(cu124['python_range'], ((3, 10), (3, 12)))
+
+
+class TestCheckPythonVersionSupported(unittest.TestCase):
+    """Test Python version support checking."""
+    
+    def test_python_version_in_range(self):
+        """Test Python version within supported range."""
+        config = {
+            'name': 'cu128-torch291',
+            'cuda': (12, 8),
+            'torch': (2, 9, 1),
+            'python_range': ((3, 10), (3, 13))
+        }
+        
+        self.assertTrue(find_wheel.check_python_version_supported((3, 10), config))
+        self.assertTrue(find_wheel.check_python_version_supported((3, 11), config))
+        self.assertTrue(find_wheel.check_python_version_supported((3, 12), config))
+        self.assertTrue(find_wheel.check_python_version_supported((3, 13), config))
+    
+    def test_python_version_out_of_range(self):
+        """Test Python version outside supported range."""
+        config = {
+            'name': 'cu124-torch251',
+            'cuda': (12, 4),
+            'torch': (2, 5, 1),
+            'python_range': ((3, 10), (3, 12))
+        }
+        
+        self.assertFalse(find_wheel.check_python_version_supported((3, 9), config))
+        self.assertFalse(find_wheel.check_python_version_supported((3, 13), config))
+        self.assertFalse(find_wheel.check_python_version_supported((3, 14), config))
+    
+    def test_python_version_no_range(self):
+        """Test that configs without python_range always pass."""
+        config = {
+            'name': 'cu128-torch291',
+            'cuda': (12, 8),
+            'torch': (2, 9, 1)
+        }
+        
+        # Should pass for any Python version when no range is specified
+        self.assertTrue(find_wheel.check_python_version_supported((3, 9), config))
+        self.assertTrue(find_wheel.check_python_version_supported((3, 10), config))
+        self.assertTrue(find_wheel.check_python_version_supported((3, 13), config))
+
+
+class TestFetchRemoteIndex(unittest.TestCase):
+    """Test remote index fetching."""
+    
+    def test_fetch_remote_index_success(self):
+        """Test successful fetch with mocked urlopen."""
+        mock_html = b'<html><body>test</body></html>'
+        
+        with patch('find_wheel.urlopen') as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = mock_html
+            mock_response.__enter__.return_value = mock_response
+            mock_response.__exit__.return_value = False
+            mock_urlopen.return_value = mock_response
+            
+            result = find_wheel.fetch_remote_index('http://example.com/index.html')
+            
+            self.assertEqual(result, '<html><body>test</body></html>')
+            mock_urlopen.assert_called_once()
+    
+    def test_fetch_remote_index_failure(self):
+        """Test fetch failure with mocked urlopen."""
+        with patch('find_wheel.urlopen') as mock_urlopen:
+            from urllib.error import URLError
+            mock_urlopen.side_effect = URLError('Connection failed')
+            
+            result = find_wheel.fetch_remote_index('http://example.com/index.html')
+            
+            self.assertIsNone(result)
+
+
 if __name__ == '__main__':
     unittest.main()

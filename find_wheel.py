@@ -10,6 +10,8 @@ import re
 import argparse
 from pathlib import Path
 from typing import Optional, Tuple, List
+from urllib.request import urlopen
+from urllib.error import URLError
 
 
 def parse_version(version_str: str) -> Tuple[int, int, int]:
@@ -59,19 +61,107 @@ def format_cuda_version(cuda_tuple: Tuple[int, int]) -> str:
     return f"{cuda_tuple[0]}.{cuda_tuple[1]}"
 
 
+def parse_python_range(range_str: str) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    """
+    Parse Python version range string like '3.10-3.13' into ((3, 10), (3, 13)).
+    Returns None if parsing fails.
+    """
+    match = re.match(r'^(\d+)\.(\d+)-(\d+)\.(\d+)$', range_str.strip())
+    if not match:
+        return None
+    
+    min_major, min_minor, max_major, max_minor = match.groups()
+    return ((int(min_major), int(min_minor)), (int(max_major), int(max_minor)))
+
+
+def parse_configs_from_index_html(html: str) -> List[dict]:
+    """
+    Parse wheel configurations from the index.html table.
+    
+    Returns list of dicts with 'name', 'cuda', 'torch', and optionally 'python_range' keys.
+    The table format is:
+    <tr><td>CUDA</td><td>PyTorch</td><td>Python</td><td><a href="cuXXX-torchYYY/">...</a></td></tr>
+    """
+    configs = []
+    
+    # Find all table rows with config links
+    # Pattern: <tr><td>13.0</td><td>2.9.1</td><td>3.10-3.13</td><td><a href="cu130-torch291/">cu130-torch291</a></td></tr>
+    pattern = r'<tr><td>([0-9.]+)</td><td>([0-9.]+)</td><td>([0-9.-]+)</td><td><a href="([^"]+)/">'
+    
+    for match in re.finditer(pattern, html):
+        cuda_str, torch_str, python_range_str, config_name = match.groups()
+        
+        try:
+            # Parse CUDA version
+            cuda_tuple = parse_cuda_version(cuda_str)
+            
+            # Parse PyTorch version
+            torch_tuple = parse_version(torch_str)
+            
+            # Parse Python range (optional, may fail)
+            python_range = parse_python_range(python_range_str)
+            
+            config = {
+                'name': config_name,
+                'cuda': cuda_tuple,
+                'torch': torch_tuple,
+            }
+            
+            if python_range:
+                config['python_range'] = python_range
+            
+            configs.append(config)
+            
+        except (ValueError, AttributeError):
+            # Skip configs we can't parse
+            continue
+    
+    # Sort by PyTorch version (descending), then CUDA version (descending)
+    configs.sort(key=lambda c: (c['torch'], c['cuda']), reverse=True)
+    
+    return configs
+
+
+def fetch_remote_index(url: str, timeout: int = 10) -> Optional[str]:
+    """
+    Fetch the remote index.html.
+    Returns the HTML content as a string, or None if the fetch fails.
+    """
+    try:
+        with urlopen(url, timeout=timeout) as response:
+            return response.read().decode('utf-8')
+    except (URLError, OSError, UnicodeDecodeError):
+        return None
+
+
 def discover_configs(wheels_dir: Path) -> List[dict]:
     """
-    Discover available wheel configurations by scanning wheels/*/ directories.
-    Returns list of dicts with 'name', 'cuda', 'torch' keys.
+    Discover available wheel configurations by scanning wheels/*/ directories
+    or by parsing wheels/index.html if it exists.
     
-    Config directory names follow pattern: cu{CUDA_SHORT}-torch{TORCH_SHORT}
-    e.g., cu128-torch291 means CUDA 12.8, PyTorch 2.9.1
+    Returns list of dicts with 'name', 'cuda', 'torch', and optionally 'python_range' keys.
+    
+    If index.html exists, prefer parsing it (includes Python ranges).
+    Otherwise, fall back to directory scanning (no Python ranges).
     """
     configs = []
     
     if not wheels_dir.exists():
         return configs
     
+    # Try to parse index.html first (includes Python ranges)
+    index_html_path = wheels_dir / 'index.html'
+    if index_html_path.exists():
+        try:
+            with open(index_html_path, 'r', encoding='utf-8') as f:
+                html = f.read()
+            configs = parse_configs_from_index_html(html)
+            if configs:
+                return configs
+        except (OSError, UnicodeDecodeError):
+            pass
+    
+    # Fall back to directory scanning
     for config_dir in wheels_dir.iterdir():
         if not config_dir.is_dir() or config_dir.name == '.git':
             continue
@@ -105,6 +195,19 @@ def discover_configs(wheels_dir: Path) -> List[dict]:
     configs.sort(key=lambda c: (c['torch'], c['cuda']), reverse=True)
     
     return configs
+
+
+def check_python_version_supported(python_version: Tuple[int, int], config: dict) -> bool:
+    """
+    Check if the Python version is supported by the config.
+    Returns True if supported, False if not, or True if python_range is not available.
+    """
+    if 'python_range' not in config:
+        # No range info available, assume supported
+        return True
+    
+    min_version, max_version = config['python_range']
+    return min_version <= python_version <= max_version
 
 
 def find_matching_config(python_version: Tuple[int, int], 
@@ -235,7 +338,38 @@ Examples:
     # Discover available configurations
     configs = discover_configs(wheels_dir)
     
-    if not configs:
+    # If no configs found and --wheels-dir was not explicitly given, try remote fallback
+    if not configs and not args.wheels_dir:
+        # Try GitHub Pages first, then raw GitHub as fallback
+        remote_urls = [
+            args.base_url.rstrip('/') + '/index.html',
+            'https://raw.githubusercontent.com/by-ae/nvdiffrec_render-wheels/main/wheels/index.html'
+        ]
+        
+        html = None
+        for url in remote_urls:
+            html = fetch_remote_index(url)
+            if html:
+                break
+        
+        if html:
+            configs = parse_configs_from_index_html(html)
+        
+        if not configs:
+            print("Error: No wheel configurations found.", file=sys.stderr)
+            print(f"Local directory does not exist: {wheels_dir}", file=sys.stderr)
+            if html:
+                print(f"Remote index was fetched but contained no configs", file=sys.stderr)
+            else:
+                print(f"Could not fetch remote index from:", file=sys.stderr)
+                for url in remote_urls:
+                    print(f"  {url}", file=sys.stderr)
+            print(file=sys.stderr)
+            print("To fix this:", file=sys.stderr)
+            print("1. Clone the repository: git clone https://github.com/by-ae/nvdiffrec_render-wheels", file=sys.stderr)
+            print("2. Run from the repository root, or use --wheels-dir to specify the path", file=sys.stderr)
+            sys.exit(1)
+    elif not configs:
         print("Error: No wheel configurations found.", file=sys.stderr)
         if wheels_dir.exists():
             print(f"Checked directory: {wheels_dir}", file=sys.stderr)
@@ -330,6 +464,31 @@ Examples:
     )
     
     if exact_match:
+        # Check if Python version is supported
+        if not check_python_version_supported(python_version, exact_match):
+            print("❌ Found matching CUDA and PyTorch, but Python version not supported.")
+            print()
+            cuda_str = format_cuda_version(exact_match['cuda'])
+            torch_str = f"{exact_match['torch'][0]}.{exact_match['torch'][1]}.{exact_match['torch'][2]}"
+            print(f"Config: {exact_match['name']} (CUDA {cuda_str}, PyTorch {torch_str})")
+            
+            if 'python_range' in exact_match:
+                min_py, max_py = exact_match['python_range']
+                print(f"Supported Python: {min_py[0]}.{min_py[1]}-{max_py[0]}.{max_py[1]}")
+            
+            print(f"Your Python: {python_version[0]}.{python_version[1]}")
+            print()
+            print("Available configurations:")
+            for config in configs:
+                cuda_str = format_cuda_version(config['cuda'])
+                torch_str = f"{config['torch'][0]}.{config['torch'][1]}.{config['torch'][2]}"
+                py_range = ""
+                if 'python_range' in config:
+                    min_py, max_py = config['python_range']
+                    py_range = f", Python {min_py[0]}.{min_py[1]}-{max_py[0]}.{max_py[1]}"
+                print(f"  {config['name']}: CUDA {cuda_str}, PyTorch {torch_str}{py_range}")
+            sys.exit(1)
+        
         print("✅ Found exact match!")
         print()
         print("Install command:")
@@ -342,16 +501,30 @@ Examples:
     print()
     
     if nearest_match:
-        cuda_str = format_cuda_version(nearest_match['cuda'])
-        torch_str = f"{nearest_match['torch'][0]}.{nearest_match['torch'][1]}.{nearest_match['torch'][2]}"
-        print(f"💡 Nearest match: {nearest_match['name']}")
-        print(f"   CUDA {cuda_str}, PyTorch {torch_str}")
-        print()
-        print("Install command:")
-        print(f"  {format_pip_command(nearest_match['name'], args.base_url)}")
-        print()
-        print("Note: This may work if your CUDA runtime is backward-compatible,")
-        print("but for best results, install PyTorch matching an available config.")
+        # Check if Python version is supported
+        if not check_python_version_supported(python_version, nearest_match):
+            print("💡 Nearest match found, but Python version not supported.")
+            print()
+            cuda_str = format_cuda_version(nearest_match['cuda'])
+            torch_str = f"{nearest_match['torch'][0]}.{nearest_match['torch'][1]}.{nearest_match['torch'][2]}"
+            print(f"Config: {nearest_match['name']} (CUDA {cuda_str}, PyTorch {torch_str})")
+            
+            if 'python_range' in nearest_match:
+                min_py, max_py = nearest_match['python_range']
+                print(f"Supported Python: {min_py[0]}.{min_py[1]}-{max_py[0]}.{max_py[1]}")
+            
+            print(f"Your Python: {python_version[0]}.{python_version[1]}")
+        else:
+            cuda_str = format_cuda_version(nearest_match['cuda'])
+            torch_str = f"{nearest_match['torch'][0]}.{nearest_match['torch'][1]}.{nearest_match['torch'][2]}"
+            print(f"💡 Nearest match: {nearest_match['name']}")
+            print(f"   CUDA {cuda_str}, PyTorch {torch_str}")
+            print()
+            print("Install command:")
+            print(f"  {format_pip_command(nearest_match['name'], args.base_url)}")
+            print()
+            print("Note: This may work if your CUDA runtime is backward-compatible,")
+            print("but for best results, install PyTorch matching an available config.")
     
     print()
     print("Available configurations:")
