@@ -120,6 +120,11 @@ jobs:
           python setup.py bdist_wheel
           ls -la dist/
 
+      - name: Validate wheel imports
+        run: |
+          cd nvdiffrec_render_pkg
+          python -c "import nvdiffrec_render; import nvdiffrec_render.renderutils; print('✓ Wheel imports successfully')"
+
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
@@ -239,6 +244,12 @@ jobs:
           pip install --no-build-isolation .
           python setup.py bdist_wheel
           dir dist
+
+      - name: Validate wheel imports
+        shell: bash
+        run: |
+          cd nvdiffrec_render_pkg
+          python -c "import nvdiffrec_render; import nvdiffrec_render.renderutils; print('✓ Wheel imports successfully')"
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
