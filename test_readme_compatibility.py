@@ -160,6 +160,17 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         }
         self.assertEqual(set(offered), published_names)
 
+    def test_release_jobs_upload_wheels_and_index_updates_are_serialized(self):
+        for path in sorted(WORKFLOWS.glob("build-cu*-torch*.yml")):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("\n          files: wheels/*.whl\n", text, path.name)
+            self.assertIn("fail_on_unmatched_files: true", text)
+            self.assertIn("group: wheel-index-update", text)
+            self.assertIn("queue: max", text)
+            self.assertIn("cancel-in-progress: false", text)
+            self.assertNotIn("git pull --rebase origin main || true", text)
+            self.assertNotIn("- '.github/workflows/build-cu*-torch*.yml'", text)
+
     def test_cu130_is_described_as_unpublished(self):
         workflow = self.by_name["cu130-torch291"]
         self.assertEqual(workflow["linux"], ["3.10", "3.11", "3.12", "3.13"])
