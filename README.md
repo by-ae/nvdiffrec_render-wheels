@@ -25,12 +25,7 @@ pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_rend
 
 Choose the command matching your CUDA and PyTorch versions:
 
-**CUDA 13.0 + PyTorch 2.9.1** (Linux only, Python 3.10-3.13):
-```bash
-pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu130-torch291/
-```
-
-**CUDA 12.8 + PyTorch 2.9.1** (Linux only, Python 3.10-3.13):
+**CUDA 12.8 + PyTorch 2.9.1** (Linux and Windows, Python 3.10-3.13):
 ```bash
 pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu128-torch291/
 ```
@@ -84,9 +79,9 @@ python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {
 ```
 
 Match the output to one of the configurations above. For example:
-- Output: `PyTorch: 2.9.1` and `CUDA: 13.0` → use **cu130-torch291**
 - Output: `PyTorch: 2.9.1` and `CUDA: 12.8` → use **cu128-torch291**
 - Output: `PyTorch: 2.6.0` and `CUDA: 12.6` → use **cu126-torch260**
+- Output: `PyTorch: 2.9.1` and `CUDA: 13.0` → no wheel is published yet (see below)
 
 You can also check your Python version:
 ```bash
@@ -97,12 +92,17 @@ python --version
 
 | CUDA | PyTorch | Python Versions | Platforms |
 |------|---------|-----------------|-----------|
-| 13.0 | 2.9.1 | 3.10, 3.11, 3.12, 3.13 | Linux only |
-| 12.8 | 2.9.1 | 3.10, 3.11, 3.12, 3.13 | Linux only |
+| 12.8 | 2.9.1 | 3.10, 3.11, 3.12, 3.13 | Linux, Windows |
 | 12.8 | 2.8.0 | 3.10, 3.11, 3.12, 3.13 | Linux, Windows |
 | 12.6 | 2.8.0 | 3.10, 3.11, 3.12, 3.13 | Linux, Windows |
 | 12.6 | 2.6.0 | 3.10, 3.11, 3.12, 3.13 | Linux, Windows |
 | 12.4 | 2.5.1 | 3.10, 3.11, 3.12 | Linux, Windows |
+
+Each row is a set of wheels linked from this repo's index. The build workflow installs that PyTorch version from the official index at `https://download.pytorch.org/whl/cu124`, `cu126`, or `cu128`.
+
+## Not published yet
+
+CUDA 13.0 + PyTorch 2.9.1 (`cu130-torch291`) has a Linux-only workflow, `build-cu130-torch291.yml`, for Python 3.10, 3.11, 3.12, and 3.13. It installs PyTorch from `https://download.pytorch.org/whl/cu130`. The GitHub release `cu130-torch291` currently has no wheel assets, and [its index page](https://by-ae.github.io/nvdiffrec_render-wheels/cu130-torch291/) has no files for pip. There is no install command until that release contains wheels.
 
 **GPU Support:** RTX 20/30/40/50 series (SM 7.5+)
 
@@ -120,10 +120,10 @@ This means pip couldn't find a wheel for your configuration. Common causes:
    - Check with: `python --version`
 
 3. **Wrong platform**: Only Linux (x86_64) and Windows (amd64) are supported
-   - CUDA 13.0 + PyTorch 2.9.1 is **Linux only**
-   - CUDA 12.8 + PyTorch 2.9.1 is **Linux only**
 
-4. **Typo in find-links URL**: Make sure to copy the full URL including the configuration subdirectory
+4. **CUDA 13.0 + PyTorch 2.9.1**: that release has no wheel files, so pip cannot install from its index page
+
+5. **Typo in find-links URL**: Make sure to copy the full URL including the configuration subdirectory
 
 **Solution**: Use a specific configuration command from the "Install Specific Configuration" section above.
 

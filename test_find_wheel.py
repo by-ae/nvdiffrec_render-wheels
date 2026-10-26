@@ -382,8 +382,17 @@ class TestParseConfigsFromIndexHTML(unittest.TestCase):
         
         configs = find_wheel.parse_configs_from_index_html(html)
         
-        # Should have at least 6 configs
-        self.assertGreaterEqual(len(configs), 6)
+        # Published configurations only. cu130-torch291 has no wheels.
+        self.assertEqual(
+            {config['name'] for config in configs},
+            {
+                'cu124-torch251',
+                'cu126-torch260',
+                'cu126-torch280',
+                'cu128-torch280',
+                'cu128-torch291',
+            },
+        )
         
         # Check structure
         for config in configs:
