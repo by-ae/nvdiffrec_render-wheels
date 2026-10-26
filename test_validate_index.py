@@ -70,6 +70,28 @@ class TestIndexHTMLParser(unittest.TestCase):
         self.assertEqual(len(parser.links), 2)
         self.assertIn("wheel1.whl", parser.links)
         self.assertIn("https://example.com/wheel2.whl", parser.links)
+
+    def test_hash_fragment_is_a_wheel_link_not_a_subdirectory(self):
+        """PEP 503 hash fragments stay attached to the wheel URL."""
+        html = """
+        <html>
+        <body>
+        <a href="https://example.com/nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-linux_x86_64.whl#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef">wheel</a>
+        <a href="cu128-torch291/">config</a>
+        </body>
+        </html>
+        """
+        parser = validate_index.IndexHTMLParser()
+        parser.feed(html)
+        self.assertEqual(len(parser.links), 1)
+        self.assertTrue(parser.links[0].endswith(".whl#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"))
+        self.assertEqual(parser.subdirs, ["cu128-torch291"])
+        self.assertEqual(validate_index.wheel_href_error(parser.links[0]), "")
+
+    def test_malformed_hash_fragment_is_rejected(self):
+        href = "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-linux_x86_64.whl#md5=abcd"
+        error = validate_index.wheel_href_error(href)
+        self.assertIn("hash fragment", error)
     
     def test_parse_subdirectory_links(self):
         """Test parsing subdirectory links from HTML."""
