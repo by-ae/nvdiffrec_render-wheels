@@ -1,21 +1,120 @@
 #!/usr/bin/env python3
 """
-Generate the root wheels/index.html that includes links to all wheels
-from all subdirectories, making --find-links to the root URL work reliably.
+Generate wheels/index.html from the per-configuration indexes.
+
+Python ranges come from the wheel filenames that are actually linked, not
+from a hardcoded table. A configuration with no valid wheel links stays
+reachable (the top index must link every subdirectory) but is not listed
+as installable. Pip --find-links uses the wheel anchors copied from the
+per-configuration pages, including any PEP 503 hash fragment.
 """
+from html.parser import HTMLParser
 from pathlib import Path
+import re
 import sys
 
-def main():
-    wheels_dir = Path('wheels')
+import validate_index
+
+
+def versions_from_dirname(name: str):
+    """Return (cuda, torch) display strings for cu128-torch291, or None."""
+    match = re.fullmatch(r'cu(\d+)-torch(\d+)', name)
+    if not match:
+        return None
+    cuda_short, torch_short = match.groups()
+    if len(cuda_short) not in (3, 4) or len(torch_short) != 3:
+        return None
+    cuda = f"{int(cuda_short[:2])}.{int(cuda_short[2:])}"
+    torch = f"{int(torch_short[0])}.{int(torch_short[1])}.{int(torch_short[2])}"
+    return cuda, torch
+
+
+def python_range(filenames):
+    """Return '3.10-3.13' when the cp tags form one contiguous range."""
+    versions = set()
+    for name in filenames:
+        match = re.search(r'-cp(3\d+)-', name)
+        if not match:
+            raise SystemExit(f"Wheel filename has no Python tag: {name}")
+        tag = match.group(1)
+        versions.add((int(tag[0]), int(tag[1:])))
+    ordered = sorted(versions)
+    for (major, minor), (next_major, next_minor) in zip(ordered, ordered[1:]):
+        if major != next_major or next_minor != minor + 1:
+            raise SystemExit(
+                f"Python versions are not a contiguous range: {ordered}"
+            )
+    low, high = ordered[0], ordered[-1]
+    return f"{low[0]}.{low[1]}-{high[0]}.{high[1]}"
+
+
+class _AnchorParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.hrefs = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag != 'a':
+            return
+        href = dict(attrs).get('href', '')
+        path, _fragment = validate_index.split_wheel_href(href)
+        if path.endswith('.whl'):
+            self.hrefs.append(href)
+
+
+def valid_wheel_links(html: str):
+    """Return (filename, href) for anchors that pass the wheel-name check."""
+    parser = _AnchorParser()
+    parser.feed(html)
+    links = []
+    for href in parser.hrefs:
+        if validate_index.wheel_href_error(href):
+            continue
+        path, _fragment = validate_index.split_wheel_href(href)
+        links.append((path.rsplit('/', 1)[-1], href))
+    links.sort(key=lambda item: item[0])
+    return links
+
+
+def collect_configs(wheels_dir: Path):
+    """Return (published, unpublished) config dicts sorted by CUDA then PyTorch."""
+    published = []
+    unpublished = []
+    for subdir in wheels_dir.iterdir():
+        if not subdir.is_dir() or not (subdir / 'index.html').exists():
+            continue
+        versions = versions_from_dirname(subdir.name)
+        if versions is None:
+            raise SystemExit(f"Unrecognized configuration directory: {subdir.name}")
+        cuda, torch = versions
+        links = valid_wheel_links((subdir / 'index.html').read_text(encoding='utf-8'))
+        entry = {
+            'name': subdir.name,
+            'cuda': cuda,
+            'torch': torch,
+            'links': links,
+        }
+        if links:
+            entry['python'] = python_range([name for name, _href in links])
+            published.append(entry)
+        else:
+            unpublished.append(entry)
+
+    def sort_key(entry):
+        cuda_parts = tuple(int(part) for part in entry['cuda'].split('.'))
+        torch_parts = tuple(int(part) for part in entry['torch'].split('.'))
+        return cuda_parts, torch_parts
+
+    published.sort(key=sort_key)
+    unpublished.sort(key=sort_key)
+    return published, unpublished
+
+
+def build_html(wheels_dir: Path) -> str:
     if not wheels_dir.exists():
-        print(f"Error: {wheels_dir} directory not found")
-        sys.exit(1)
-    
-    # Collect all subdirectories
-    subdirs = sorted([d for d in wheels_dir.iterdir() if d.is_dir() and (d / 'index.html').exists()])
-    
-    # Start building the HTML
+        raise SystemExit(f"Error: {wheels_dir} directory not found")
+
+    published, unpublished = collect_configs(wheels_dir)
     html = """<!DOCTYPE html>
 <html>
 <head>
@@ -42,68 +141,50 @@ def main():
 <table>
     <tr><th>CUDA</th><th>PyTorch</th><th>Python</th><th>Link</th></tr>
 """
-    
-    # Configuration mapping (parsed from directory names)
-    config_info = {
-        'cu130-torch291': ('13.0', '2.9.1', '3.10-3.13'),
-        'cu128-torch291': ('12.8', '2.9.1', '3.10-3.13'),
-        'cu128-torch280': ('12.8', '2.8.0', '3.10-3.13'),
-        'cu126-torch280': ('12.6', '2.8.0', '3.10-3.13'),
-        'cu126-torch260': ('12.6', '2.6.0', '3.10-3.13'),
-        'cu124-torch251': ('12.4', '2.5.1', '3.10-3.12'),
-    }
-    
-    for subdir in subdirs:
-        name = subdir.name
-        if name in config_info:
-            cuda, torch, python = config_info[name]
-            html += f'    <tr><td>{cuda}</td><td>{torch}</td><td>{python}</td><td><a href="{name}/">{name}</a></td></tr>\n'
-    
-    html += """</table>
-
+    for entry in published:
+        html += (
+            f"    <tr><td>{entry['cuda']}</td><td>{entry['torch']}</td>"
+            f"<td>{entry['python']}</td>"
+            f"<td><a href=\"{entry['name']}/\">{entry['name']}</a></td></tr>\n"
+        )
+    html += "</table>\n"
+    if unpublished:
+        html += "\n<h2>No wheels published yet</h2>\n"
+        for entry in unpublished:
+            html += (
+                f"<p><a href=\"{entry['name']}/\">{entry['name']}</a> "
+                f"(CUDA {entry['cuda']}, PyTorch {entry['torch']}) "
+                f"has an index page and no wheel files.</p>\n"
+            )
+    html += """
 <div class="wheels">
 <h2>All Wheels</h2>
 <p>Direct links to all available wheels (for pip --find-links):</p>
 """
-    
-    # Collect wheel links from each subdir's index
-    from html.parser import HTMLParser
-    
-    class WheelLinkParser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.wheel_links = []
-        
-        def handle_starttag(self, tag, attrs):
-            if tag == 'a':
-                href = dict(attrs).get('href', '')
-                if '.whl' in href:
-                    self.wheel_links.append(href)
-    
-    for subdir in subdirs:
-        index_file = subdir / 'index.html'
-        parser = WheelLinkParser()
-        parser.feed(index_file.read_text())
-        
-        if parser.wheel_links:
-            html += f'<h3>{subdir.name}</h3>\n'
-            for link in parser.wheel_links:
-                # Keep the full GitHub release URLs
-                filename = link.split('/')[-1]
-                html += f'<a href="{link}">{filename}</a><br>\n'
-    
+    for entry in published:
+        html += f"<h3>{entry['name']}</h3>\n"
+        for filename, href in entry['links']:
+            html += f'<a href="{href}">{filename}</a><br>\n'
     html += """</div>
 
 <p style="margin-top: 30px;"><a href="https://github.com/by-ae/nvdiffrec_render-wheels">GitHub Repository</a></p>
 </body>
 </html>
 """
-    
-    # Write the root index
+    return html
+
+
+def main():
+    wheels_dir = Path('wheels')
+    html = build_html(wheels_dir)
     output_file = wheels_dir / 'index.html'
-    output_file.write_text(html)
+    output_file.write_text(html, encoding='utf-8')
+    published, unpublished = collect_configs(wheels_dir)
     print(f"Generated {output_file}")
-    print(f"Found {len(subdirs)} configurations")
+    print(f"Found {len(published)} configurations with wheels")
+    if unpublished:
+        print("No wheels yet: " + ", ".join(entry['name'] for entry in unpublished))
+
 
 if __name__ == '__main__':
     main()

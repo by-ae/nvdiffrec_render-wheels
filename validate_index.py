@@ -26,11 +26,38 @@ class IndexHTMLParser(HTMLParser):
         elif tag == 'a' and self.in_body:
             href = dict(attrs).get('href')
             if href:
-                if href.endswith('.whl'):
+                path, _fragment = split_wheel_href(href)
+                if path.endswith('.whl'):
                     self.links.append(href)
-                elif '/' in href or href.endswith('/'):
-                    # Track subdirectory links
-                    self.subdirs.append(href.rstrip('/'))
+                elif '/' in path or path.endswith('/'):
+                    # Track subdirectory links. Hash fragments are not part of
+                    # the path, so a wheel URL with #sha256=... stays a wheel.
+                    self.subdirs.append(path.rstrip('/'))
+
+
+def split_wheel_href(href: str) -> Tuple[str, str]:
+    """Split a link into path and optional URL fragment.
+
+    PEP 503 puts the file hash in the fragment (#sha256=<hex>). The path is
+    what ends with .whl; the fragment must not be treated as part of the
+    filename or as a subdirectory.
+    """
+    path, sep, fragment = href.partition('#')
+    return path, fragment if sep else ''
+
+
+def wheel_href_error(href: str) -> str:
+    """Return an error message for a wheel href, or '' when it is acceptable.
+
+    A missing hash is allowed. A present hash must be a single sha256 digest,
+    which is the fragment this repo's index generator writes.
+    """
+    path, fragment = split_wheel_href(href)
+    if fragment and not re.fullmatch(r'sha256=[a-f0-9]{64}', fragment):
+        return f"Invalid or unsupported hash fragment (expected #sha256=<64 hex>): {href}"
+    filename = path.rsplit('/', 1)[-1]
+    _ok, message = validate_wheel_filename(filename)
+    return '' if _ok else message
 
 
 def validate_wheel_filename(filename: str) -> Tuple[bool, str]:
@@ -97,17 +124,11 @@ def validate_subindex(path: Path) -> Tuple[List[str], List[str]]:
         
         print(f"  Found {len(parser.links)} wheel link(s)")
         
-        # Validate each wheel filename
+        # Validate each wheel filename and optional PEP 503 hash fragment
         for link in parser.links:
-            # Extract just the filename from URL
-            if '/' in link:
-                filename = link.split('/')[-1]
-            else:
-                filename = link
-            
-            valid, error_msg = validate_wheel_filename(filename)
-            if not valid:
-                errors.append(f"Invalid wheel filename in {path}: {error_msg}")
+            error_msg = wheel_href_error(link)
+            if error_msg:
+                errors.append(f"Invalid wheel link in {path}: {error_msg}")
         
         # Check for basic HTML structure
         if '<html>' not in content.lower() or '</html>' not in content.lower():
@@ -162,6 +183,11 @@ def validate_top_index(path: Path, wheels_dir: Path) -> Tuple[List[str], List[st
         
         print(f"  Actual subdirs: {sorted(actual_subdirs)}")
         print(f"  Linked subdirs: {sorted(linked_subdirs)}")
+
+        for link in parser.links:
+            error_msg = wheel_href_error(link)
+            if error_msg:
+                errors.append(f"Invalid wheel link in {path}: {error_msg}")
         
     except Exception as e:
         errors.append(f"Failed to parse {path}: {e}")

@@ -9,6 +9,12 @@ on:
       - 'validate_index.py'
       - 'find_wheel.py'
       - 'test_find_wheel.py'
+      - 'generate_config_index.sh'
+      - 'test_generate_config_index.py'
+      - 'test_validate_index.py'
+      - 'generate_root_index.py'
+      - 'test_readme_compatibility.py'
+      - 'README.md'
   push:
     branches: [main]
     paths:
@@ -18,6 +24,12 @@ on:
       - 'validate_index.py'
       - 'find_wheel.py'
       - 'test_find_wheel.py'
+      - 'generate_config_index.sh'
+      - 'test_generate_config_index.py'
+      - 'test_validate_index.py'
+      - 'generate_root_index.py'
+      - 'test_readme_compatibility.py'
+      - 'README.md'
 
 jobs:
   validate-setup:
@@ -46,6 +58,14 @@ jobs:
       - name: Test index validator
         run: |
           python test_validate_index.py
+
+      - name: Test config index generator
+        run: |
+          python test_generate_config_index.py
+
+      - name: Test README matches published wheels
+        run: |
+          python test_readme_compatibility.py
       
       - name: Test wheel finder
         run: |
