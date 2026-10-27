@@ -110,6 +110,33 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         ]
         cls.by_name = {item["name"]: item for item in cls.workflows}
 
+    def test_quick_install_describes_the_wheel_pip_selects(self):
+        published, _unpublished = generate_root_index.collect_configs(WHEELS)
+        version, entry = generate_root_index.preferred_release(published)
+        # packaging.version ranks 0.0.1+cu128torch29 above the other published
+        # local labels. pip installs that file from the combined index.
+        self.assertEqual(version, "0.0.1+cu128torch29")
+        self.assertEqual(entry["name"], "cu128-torch291")
+        quick = self.readme.split("### Quick Install", 1)[1].split("### ", 1)[0]
+        self.assertNotIn("auto-detect", quick.lower())
+        self.assertIn(version, quick)
+        self.assertIn(entry["name"], quick)
+        html = generate_root_index.build_html(WHEELS)
+        self.assertIn(f"<code>{version}</code>", html)
+        self.assertNotIn("auto-detect", html.lower())
+        with self.assertRaises(SystemExit):
+            generate_root_index.preferred_release(
+                [{
+                    "name": "cu128-torch291",
+                    "cuda": "12.8",
+                    "torch": "2.9.1",
+                    "links": [(
+                        "nvdiffrec_render-1.2.3+cu128.torch29-cp310-cp310-linux_x86_64.whl",
+                        "x",
+                    )],
+                }]
+            )
+
     def test_root_index_matches_the_generator(self):
         generated = generate_root_index.build_html(WHEELS)
         checked_in = (WHEELS / "index.html").read_text(encoding="utf-8")
@@ -160,6 +187,20 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         }
         self.assertEqual(set(offered), published_names)
 
+    def test_build_jobs_validate_the_wheel_archive(self):
+        """The import check used to run inside nvdiffrec_render_pkg.
+
+        Python then loads the source tree, which has no _C extension, and
+        the job fails after a good wheel was built. Run 40233374869 failed
+        this way on every matrix leg and skipped the release.
+        """
+        command = "python validate_wheel.py nvdiffrec_render_pkg/dist/*.whl"
+        for path in sorted(WORKFLOWS.glob("build-cu*-torch*.yml")):
+            text = path.read_text(encoding="utf-8")
+            expected = 2 if "\n  build-windows:\n" in text else 1
+            self.assertEqual(text.count(command), expected, path.name)
+            self.assertNotIn("import nvdiffrec_render", text, path.name)
+
     def test_release_jobs_upload_wheels_and_index_updates_are_serialized(self):
         for path in sorted(WORKFLOWS.glob("build-cu*-torch*.yml")):
             text = path.read_text(encoding="utf-8")
@@ -169,6 +210,8 @@ class ReadmeCompatibilityTest(unittest.TestCase):
             self.assertIn("queue: max", text)
             self.assertIn("cancel-in-progress: false", text)
             self.assertNotIn("git pull --rebase origin main || true", text)
+            self.assertNotIn("git rebase --abort", text, path.name)
+            self.assertIn("\n        run: ./publish_index_update.sh\n", text, path.name)
             self.assertNotIn("- '.github/workflows/build-cu*-torch*.yml'", text)
 
     def test_cu130_is_described_as_unpublished(self):

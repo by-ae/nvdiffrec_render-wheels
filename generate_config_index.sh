@@ -49,6 +49,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 tmp_html=""
 raw_file=""
 filtered_file=""
+links_body=""
 cleanup() {
     if [ -n "$tmp_html" ]; then
         rm -f "$tmp_html"
@@ -58,6 +59,9 @@ cleanup() {
     fi
     if [ -n "$filtered_file" ]; then
         rm -f "$filtered_file"
+    fi
+    if [ -n "$links_body" ]; then
+        rm -f "$links_body"
     fi
     return 0
 }
@@ -128,13 +132,15 @@ cat > "$tmp_html" <<EOF
 <body>
 <h1>nvdiffrec_render Wheels</h1>
 <p><strong>CUDA ${CUDA_VERSION} + PyTorch ${PYTORCH_VERSION}</strong></p>
-<h2>Install</h2>
-<pre>pip install nvdiffrec_render --find-links ${PAGES_URL}</pre>
-<h2>Available Wheels</h2>
 EOF
+
+install_block="<h2>Install</h2>
+<pre>pip install nvdiffrec_render --find-links ${PAGES_URL}</pre>
+<h2>Available Wheels</h2>"
 
 link_count=0
 if [ "$have_gh" -eq 1 ]; then
+    links_body=$(mktemp)
     while IFS=$'\t' read -r name digest; do
         [ -n "$name" ] || continue
         href="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${name}"
@@ -144,13 +150,21 @@ if [ "$have_gh" -eq 1 ]; then
         fi
         # Names accepted by validate_wheel_filename are URL-safe and need no
         # further escaping. Quote the attribute anyway.
-        printf '<a href="%s">%s</a><br>\n' "$href" "$name" >> "$tmp_html"
+        printf '<a href="%s">%s</a><br>\n' "$href" "$name" >> "$links_body"
         link_count=$((link_count + 1))
     done < "$filtered_file"
     if [ "$link_count" -eq 0 ]; then
-        echo "<p><em>No wheel files are published for this release yet.</em></p>" >> "$tmp_html"
+        # A pip command here 404s. Say so instead of offering the URL.
+        cat >> "$tmp_html" <<EOF
+<h2>No wheels published yet</h2>
+<p><em>No wheel files are published for this release yet.</em></p>
+EOF
+    else
+        printf '%s\n' "$install_block" >> "$tmp_html"
+        cat "$links_body" >> "$tmp_html"
     fi
 else
+    printf '%s\n' "$install_block" >> "$tmp_html"
     echo "$links_note" >> "$tmp_html"
 fi
 

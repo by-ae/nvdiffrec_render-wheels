@@ -129,10 +129,10 @@ jobs:
           python setup.py bdist_wheel
           ls -la dist/
 
-      - name: Validate wheel imports
+      - name: Validate built wheel
         run: |
-          cd nvdiffrec_render_pkg
-          python -c "import nvdiffrec_render; import nvdiffrec_render.renderutils; print('✓ Wheel imports successfully')"
+          # The package directory is on sys.path and has no _C. Inspect the archive.
+          python validate_wheel.py nvdiffrec_render_pkg/dist/*.whl
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
@@ -211,33 +211,7 @@ jobs:
         run: ./generate_config_index.sh "${{ env.CUDA_VERSION }}" "${{ env.PYTORCH_VERSION }}" "${{ env.CUDA_SHORT }}" "${{ env.TORCH_SHORT }}"
 
       - name: Commit and push index.html
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          index="wheels/cu${CUDA_SHORT}-torch${TORCH_SHORT}/index.html"
-          git add "$index"
-          if git diff --cached --quiet; then
-            echo "No index changes"
-            exit 0
-          fi
-          git commit -m "Update index: CUDA ${CUDA_VERSION} + PyTorch ${PYTORCH_VERSION}"
-          for attempt in 1 2 3 4 5; do
-            git fetch origin main
-            if ! git rebase origin/main; then
-              git rebase --abort || true
-              echo "Rebase attempt ${attempt} failed" >&2
-              exit 1
-            fi
-            if git push origin HEAD:main; then
-              echo "Pushed index update"
-              exit 0
-            fi
-            echo "Push attempt ${attempt} failed; retrying"
-            sleep $((attempt * 2))
-          done
-          echo "Failed to push index update" >&2
-          exit 1
+        run: ./publish_index_update.sh
 
       - name: Trigger Pages deployment
         env:

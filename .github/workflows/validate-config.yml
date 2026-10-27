@@ -7,9 +7,13 @@ on:
       - '.github/workflows/**'
       - 'wheels/**/*.html'
       - 'validate_index.py'
+      - 'validate_wheel.py'
+      - 'test_validate_wheel.py'
       - 'find_wheel.py'
       - 'test_find_wheel.py'
       - 'generate_config_index.sh'
+      - 'publish_index_update.sh'
+      - 'test_publish_index_update.py'
       - 'test_generate_config_index.py'
       - 'test_validate_index.py'
       - 'generate_root_index.py'
@@ -22,9 +26,13 @@ on:
       - '.github/workflows/**'
       - 'wheels/**/*.html'
       - 'validate_index.py'
+      - 'validate_wheel.py'
+      - 'test_validate_wheel.py'
       - 'find_wheel.py'
       - 'test_find_wheel.py'
       - 'generate_config_index.sh'
+      - 'publish_index_update.sh'
+      - 'test_publish_index_update.py'
       - 'test_generate_config_index.py'
       - 'test_validate_index.py'
       - 'generate_root_index.py'
@@ -59,9 +67,17 @@ jobs:
         run: |
           python test_validate_index.py
 
+      - name: Test wheel archive validator
+        run: |
+          python test_validate_wheel.py
+
       - name: Test config index generator
         run: |
           python test_generate_config_index.py
+
+      - name: Test index publish script
+        run: |
+          python test_publish_index_update.py
 
       - name: Test README matches published wheels
         run: |

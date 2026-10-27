@@ -5,8 +5,9 @@ Generate wheels/index.html from the per-configuration indexes.
 Python ranges come from the wheel filenames that are actually linked, not
 from a hardcoded table. A configuration with no valid wheel links stays
 reachable (the top index must link every subdirectory) but is not listed
-as installable. Pip --find-links uses the wheel anchors copied from the
-per-configuration pages, including any PEP 503 hash fragment.
+as installable. The root page lists every wheel anchor, including any
+PEP 503 hash fragment. Pip then keeps files whose tags match and installs
+the newest version; it does not compare the local label to PyTorch.
 """
 from html.parser import HTMLParser
 from pathlib import Path
@@ -110,6 +111,45 @@ def collect_configs(wheels_dir: Path):
     return published, unpublished
 
 
+def wheel_version(filename: str) -> str:
+    """Return the version component of a nvdiffrec_render wheel filename."""
+    stem = filename[:-4] if filename.endswith('.whl') else filename
+    parts = stem.split('-')
+    if len(parts) < 5 or parts[0] != 'nvdiffrec_render' or not parts[1]:
+        raise SystemExit(f"Cannot read wheel version: {filename}")
+    return parts[1]
+
+
+def preferred_release(published):
+    """Return (version, entry) for the file pip installs from the combined index.
+
+    Pip keeps wheels whose Python, ABI, and platform tags fit, then selects
+    the newest PEP 440 version. Every published file here is 0.0.1 plus one
+    alphanumeric local label, and ASCII order matches that rule. Refuse other
+    shapes instead of printing a version pip would not pick.
+    """
+    if not published:
+        raise SystemExit("No published wheels to rank")
+    ranked = []
+    for entry in published:
+        versions = {wheel_version(name) for name, _href in entry['links']}
+        if len(versions) != 1:
+            raise SystemExit(
+                f"{entry['name']} mixes wheel versions: {sorted(versions)}"
+            )
+        version = next(iter(versions))
+        if '+' not in version:
+            raise SystemExit(f"{entry['name']} has no local version: {version}")
+        public, local = version.split('+', 1)
+        if public != '0.0.1' or not local.isalnum():
+            raise SystemExit(
+                f"Refusing to rank {version}; pip's order is only obvious for "
+                "0.0.1 plus one alphanumeric local label"
+            )
+        ranked.append((version, entry))
+    return max(ranked, key=lambda item: item[0])
+
+
 def build_html(wheels_dir: Path) -> str:
     if not wheels_dir.exists():
         raise SystemExit(f"Error: {wheels_dir} directory not found")
@@ -134,9 +174,6 @@ def build_html(wheels_dir: Path) -> str:
 <h1>nvdiffrec_render Wheels</h1>
 <p>Pre-built Python wheels for nvdiffrec rendering utilities.</p>
 
-<h2>Install</h2>
-<pre>pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/</pre>
-
 <h2>Available Configurations</h2>
 <table>
     <tr><th>CUDA</th><th>PyTorch</th><th>Python</th><th>Link</th></tr>
@@ -148,6 +185,25 @@ def build_html(wheels_dir: Path) -> str:
             f"<td><a href=\"{entry['name']}/\">{entry['name']}</a></td></tr>\n"
         )
     html += "</table>\n"
+    if published:
+        version, preferred = preferred_release(published)
+        html += (
+            "\n<h2>Install</h2>\n"
+            "<p>Pip keeps a wheel when its Python, ABI, and platform tags match "
+            "this machine, then installs the newest version. It does not look at "
+            "which PyTorch build is already installed. The newest file here is "
+            f"<code>{version}</code> "
+            f"(CUDA {preferred['cuda']}, PyTorch {preferred['torch']}, "
+            f"<a href=\"{preferred['name']}/\">{preferred['name']}</a>). "
+            "Open another configuration above for a different build.</p>\n"
+            "<pre>pip install nvdiffrec_render --find-links "
+            "https://by-ae.github.io/nvdiffrec_render-wheels/</pre>\n"
+        )
+    else:
+        html += (
+            "\n<h2>Install</h2>\n"
+            "<p>No wheel files are published yet.</p>\n"
+        )
     if unpublished:
         html += "\n<h2>No wheels published yet</h2>\n"
         for entry in unpublished:
@@ -159,7 +215,7 @@ def build_html(wheels_dir: Path) -> str:
     html += """
 <div class="wheels">
 <h2>All Wheels</h2>
-<p>Direct links to all available wheels (for pip --find-links):</p>
+<p>Every published wheel file. On the root page, pip installs only the newest compatible file named above.</p>
 """
     for entry in published:
         html += f"<h3>{entry['name']}</h3>\n"

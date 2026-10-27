@@ -182,7 +182,8 @@ exit 0
         html = (self.work / "wheels" / "cu130-torch291" / "index.html").read_text(encoding="utf-8")
         self.assertIn("No wheel files are published for this release yet.", html)
         self.assertNotIn(".whl", html)
-        self.assertIn("cu130-torch291/", html)
+        self.assertNotIn("pip install", html)
+        self.assertNotIn("--find-links", html)
 
 
 if __name__ == "__main__":
