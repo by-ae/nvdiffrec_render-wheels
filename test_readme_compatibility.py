@@ -183,6 +183,8 @@ class ReadmeCompatibilityTest(unittest.TestCase):
             self.assertIn("queue: max", text)
             self.assertIn("cancel-in-progress: false", text)
             self.assertNotIn("git pull --rebase origin main || true", text)
+            self.assertNotIn("git rebase --abort", text, path.name)
+            self.assertIn("\n        run: ./publish_index_update.sh\n", text, path.name)
             self.assertNotIn("- '.github/workflows/build-cu*-torch*.yml'", text)
 
     def test_cu130_is_described_as_unpublished(self):
