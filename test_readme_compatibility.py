@@ -110,6 +110,33 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         ]
         cls.by_name = {item["name"]: item for item in cls.workflows}
 
+    def test_quick_install_describes_the_wheel_pip_selects(self):
+        published, _unpublished = generate_root_index.collect_configs(WHEELS)
+        version, entry = generate_root_index.preferred_release(published)
+        # packaging.version ranks 0.0.1+cu128torch29 above the other published
+        # local labels. pip installs that file from the combined index.
+        self.assertEqual(version, "0.0.1+cu128torch29")
+        self.assertEqual(entry["name"], "cu128-torch291")
+        quick = self.readme.split("### Quick Install", 1)[1].split("### ", 1)[0]
+        self.assertNotIn("auto-detect", quick.lower())
+        self.assertIn(version, quick)
+        self.assertIn(entry["name"], quick)
+        html = generate_root_index.build_html(WHEELS)
+        self.assertIn(f"<code>{version}</code>", html)
+        self.assertNotIn("auto-detect", html.lower())
+        with self.assertRaises(SystemExit):
+            generate_root_index.preferred_release(
+                [{
+                    "name": "cu128-torch291",
+                    "cuda": "12.8",
+                    "torch": "2.9.1",
+                    "links": [(
+                        "nvdiffrec_render-1.2.3+cu128.torch29-cp310-cp310-linux_x86_64.whl",
+                        "x",
+                    )],
+                }]
+            )
+
     def test_root_index_matches_the_generator(self):
         generated = generate_root_index.build_html(WHEELS)
         checked_in = (WHEELS / "index.html").read_text(encoding="utf-8")

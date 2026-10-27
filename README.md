@@ -11,15 +11,15 @@ Pre-built Python wheels for `nvdiffrec_render` (rendering utilities from [NVlabs
 
 ## Install
 
-### Quick Install (Auto-Detect)
+### Quick Install
 
-If you already have PyTorch installed, pip can usually auto-detect your configuration:
+The combined index lists every published wheel. Pip keeps a file when the Python, ABI, and platform tags match your interpreter, then installs the newest version. It does not look at `torch.version.cuda`. Every wheel here is version `0.0.1` plus a local label, and the newest one is `0.0.1+cu128torch29` (CUDA 12.8 + PyTorch 2.9.1, `cu128-torch291`):
 
 ```bash
 pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/
 ```
 
-**Note:** This works best if your CUDA and PyTorch versions match one of the available configurations below. If you get "no matching distribution found", use a specific configuration URL instead.
+Use that command when PyTorch is 2.9.1 built for CUDA 12.8. For any other combination, use the matching configuration below, or run `python find_wheel.py`.
 
 ### Install Specific Configuration
 
@@ -129,12 +129,12 @@ This means pip couldn't find a wheel for your configuration. Common causes:
 
 ### ImportError: cannot import name '_C'
 
-Ensure your CUDA runtime version matches the wheel. Check with:
+The wheel has to be built for the same PyTorch CUDA build you import. Check with:
 ```bash
 python -c "import torch; print(torch.version.cuda)"
 ```
 
-If the versions don't match, reinstall with the correct configuration.
+The root find-links URL installs `0.0.1+cu128torch29`. When `torch.version.cuda` is not `12.8`, or PyTorch is not 2.9.1, install from the matching configuration URL.
 
 ### CUDA out of memory errors
 
