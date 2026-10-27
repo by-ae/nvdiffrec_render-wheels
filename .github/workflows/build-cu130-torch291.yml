@@ -129,10 +129,10 @@ jobs:
           python setup.py bdist_wheel
           ls -la dist/
 
-      - name: Validate wheel imports
+      - name: Validate built wheel
         run: |
-          cd nvdiffrec_render_pkg
-          python -c "import nvdiffrec_render; import nvdiffrec_render.renderutils; print('✓ Wheel imports successfully')"
+          # The package directory is on sys.path and has no _C. Inspect the archive.
+          python validate_wheel.py nvdiffrec_render_pkg/dist/*.whl
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4

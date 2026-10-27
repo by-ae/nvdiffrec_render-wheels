@@ -10,6 +10,21 @@ import re
 from pathlib import Path
 
 
+def wheel_filename_version(filename):
+    """Return the version component of a wheel filename, or None.
+
+    This project's distribution name has no hyphens, so the second '-'
+    separated component is the version (PEP 427), including the local
+    label: nvdiffrec_render-0.0.1+cu128torch29-cp310-....whl.
+    """
+    if not filename.endswith('.whl'):
+        return None
+    parts = filename[:-4].split('-')
+    if len(parts) < 5 or parts[0] != 'nvdiffrec_render' or not parts[1]:
+        return None
+    return parts[1]
+
+
 def validate_wheel(wheel_path):
     """Validate a wheel file's structure and metadata."""
     errors = []
@@ -70,15 +85,27 @@ def validate_wheel(wheel_path):
                 if not any(f.startswith(expected) for f in files):
                     errors.append(f"Missing expected directory structure: {expected}")
             
-            # Verify METADATA content
+            # Verify METADATA content. Match the Version header itself:
+            # "Version:" is a substring of "Metadata-Version:".
             metadata_found = False
             for fname in files:
                 if fname.endswith('METADATA'):
                     metadata = zf.read(fname).decode('utf-8')
                     if 'Name: nvdiffrec_render' not in metadata:
                         errors.append("METADATA missing package name 'nvdiffrec_render'")
-                    if 'Version:' not in metadata:
+                    version_match = re.search(r'(?m)^Version:[ \t]*(\S+)[ \t]*$', metadata)
+                    if version_match is None:
                         errors.append("METADATA missing Version field")
+                    else:
+                        metadata_version = version_match.group(1)
+                        file_version = wheel_filename_version(wheel_name)
+                        if file_version is None:
+                            errors.append(f"Cannot read version from wheel filename: {wheel_name}")
+                        elif metadata_version != file_version:
+                            errors.append(
+                                f"METADATA Version {metadata_version} does not match "
+                                f"filename version {file_version}"
+                            )
                     metadata_found = True
                     print(f"  Package metadata validated")
                     break
@@ -96,24 +123,33 @@ def validate_wheel(wheel_path):
     return errors, warnings
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python validate_wheel.py <wheel_file_or_directory>")
+def collect_wheels(paths):
+    """Expand file and directory arguments into wheel paths."""
+    wheels = []
+    for path in paths:
+        if os.path.isdir(path):
+            found = sorted(Path(path).glob('*.whl'))
+            if not found:
+                print(f"No wheel files found in {path}")
+                sys.exit(1)
+            wheels.extend(found)
+        elif path.endswith('.whl'):
+            wheels.append(Path(path))
+        else:
+            print(f"Error: {path} is not a wheel file or directory")
+            sys.exit(1)
+    return wheels
+
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        print("Usage: python validate_wheel.py <wheel_file_or_directory> [...]")
         print("\nValidates nvdiffrec_render wheel structure and metadata.")
         sys.exit(1)
-    
-    path = sys.argv[1]
-    
-    if os.path.isdir(path):
-        wheels = list(Path(path).glob('*.whl'))
-        if not wheels:
-            print(f"No wheel files found in {path}")
-            sys.exit(1)
-    elif path.endswith('.whl'):
-        wheels = [Path(path)]
-    else:
-        print(f"Error: {path} is not a wheel file or directory")
-        sys.exit(1)
+
+    wheels = collect_wheels(argv)
     
     print(f"Found {len(wheels)} wheel(s) to validate\n")
     

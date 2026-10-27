@@ -160,6 +160,20 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         }
         self.assertEqual(set(offered), published_names)
 
+    def test_build_jobs_validate_the_wheel_archive(self):
+        """The import check used to run inside nvdiffrec_render_pkg.
+
+        Python then loads the source tree, which has no _C extension, and
+        the job fails after a good wheel was built. Run 40233374869 failed
+        this way on every matrix leg and skipped the release.
+        """
+        command = "python validate_wheel.py nvdiffrec_render_pkg/dist/*.whl"
+        for path in sorted(WORKFLOWS.glob("build-cu*-torch*.yml")):
+            text = path.read_text(encoding="utf-8")
+            expected = 2 if "\n  build-windows:\n" in text else 1
+            self.assertEqual(text.count(command), expected, path.name)
+            self.assertNotIn("import nvdiffrec_render", text, path.name)
+
     def test_release_jobs_upload_wheels_and_index_updates_are_serialized(self):
         for path in sorted(WORKFLOWS.glob("build-cu*-torch*.yml")):
             text = path.read_text(encoding="utf-8")

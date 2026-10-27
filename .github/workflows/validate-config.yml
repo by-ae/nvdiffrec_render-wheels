@@ -7,6 +7,8 @@ on:
       - '.github/workflows/**'
       - 'wheels/**/*.html'
       - 'validate_index.py'
+      - 'validate_wheel.py'
+      - 'test_validate_wheel.py'
       - 'find_wheel.py'
       - 'test_find_wheel.py'
       - 'generate_config_index.sh'
@@ -22,6 +24,8 @@ on:
       - '.github/workflows/**'
       - 'wheels/**/*.html'
       - 'validate_index.py'
+      - 'validate_wheel.py'
+      - 'test_validate_wheel.py'
       - 'find_wheel.py'
       - 'test_find_wheel.py'
       - 'generate_config_index.sh'
@@ -58,6 +62,10 @@ jobs:
       - name: Test index validator
         run: |
           python test_validate_index.py
+
+      - name: Test wheel archive validator
+        run: |
+          python test_validate_wheel.py
 
       - name: Test config index generator
         run: |
