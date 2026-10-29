@@ -3,6 +3,7 @@
 Unit tests for find_wheel.py.
 Tests version parsing, config discovery, matching logic, and integration scenarios.
 """
+import subprocess
 import unittest
 import tempfile
 import shutil
@@ -519,6 +520,42 @@ class TestFetchRemoteIndex(unittest.TestCase):
             result = find_wheel.fetch_remote_index('http://example.com/index.html')
             
             self.assertIsNone(result)
+
+
+class TestInstallCommand(unittest.TestCase):
+    """The script must not print a pip command for a different build."""
+
+    def run_finder(self, *args):
+        return subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().parent / "find_wheel.py"), *args],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_exact_match_prints_one_install_command(self):
+        result = self.run_finder("--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "pip install nvdiffrec_render --find-links "
+            "https://by-ae.github.io/nvdiffrec_render-wheels/cu128-torch291/",
+            result.stdout,
+        )
+        self.assertEqual(result.stdout.count("pip install"), 1)
+
+    def test_cuda_13_does_not_offer_the_cu128_wheel(self):
+        result = self.run_finder("--torch", "2.9.1", "--cuda", "13.0", "--python", "3.11")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("pip install", result.stdout)
+        self.assertNotIn("--find-links", result.stdout)
+        self.assertIn("cu128-torch291", result.stdout)
+        self.assertIn("will not import", result.stdout)
+
+    def test_different_torch_patch_does_not_offer_an_install_command(self):
+        result = self.run_finder("--torch", "2.9.0", "--cuda", "12.8", "--python", "3.11")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("pip install", result.stdout)
+        self.assertIn("will not import", result.stdout)
 
 
 if __name__ == '__main__':

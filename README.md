@@ -21,6 +21,8 @@ pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_rend
 
 Use that command when PyTorch is 2.9.1 built for CUDA 12.8. For any other combination, use the matching configuration below, or run `python find_wheel.py`.
 
+Install that PyTorch build first. Every published wheel depends on `torch>=2.5.0`. If torch is missing, pip installs the PyPI build, which is not the CUDA build the wheel was compiled against.
+
 ### Install Specific Configuration
 
 Choose the command matching your CUDA and PyTorch versions:
@@ -64,7 +66,7 @@ Or run it directly from the repository without cloning:
 curl -sL https://raw.githubusercontent.com/by-ae/nvdiffrec_render-wheels/main/find_wheel.py | python
 ```
 
-The script auto-detects your Python, PyTorch, and CUDA versions. If PyTorch isn't installed yet, specify your target versions manually:
+The script auto-detects your Python, PyTorch, and CUDA versions. It prints an install command only when both match a published config. A nearby CUDA or PyTorch version is a different build, and that wheel will not import. If PyTorch isn't installed yet, specify your target versions manually:
 
 ```bash
 python find_wheel.py --torch 2.9.1 --cuda 12.8 --python 3.11

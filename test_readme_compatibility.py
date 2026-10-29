@@ -254,6 +254,14 @@ class ReadmeCompatibilityTest(unittest.TestCase):
                     text,
                 )
 
+    def test_readme_says_to_install_the_matching_pytorch_first(self):
+        quick = self.readme.split("### Quick Install", 1)[1].split("### ", 1)[0]
+        self.assertIn("torch>=2.5.0", quick)
+        self.assertIn("PyPI", quick)
+        finder = self.readme.split("### Not Sure Which Wheel?", 1)[1].split("### ", 1)[0]
+        self.assertIn("only when both match a published config", finder)
+        self.assertNotIn("backward-compatible", self.readme)
+
     def test_readme_states_published_compute_capabilities(self):
         self.assertNotIn("RTX 20/30/40/50 series, A100, B100/B200", self.readme)
         section = self.readme.split("## GPU architectures", 1)
