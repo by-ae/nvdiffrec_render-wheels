@@ -25,6 +25,21 @@ def wheel_filename_version(filename):
     return parts[1]
 
 
+def canonical_distribution_name(name):
+    """PEP 503 name: lowercase, and collapse runs of '-', '_', and '.'."""
+    return re.sub(r'[-_.]+', '-', name).lower()
+
+
+def metadata_text(raw):
+    """Return METADATA with LF newlines.
+
+    bdist_wheel on Windows writes CRLF. A Version line then ends in a
+    carriage return, and the line-end pattern does not treat that as
+    whitespace, so the header looks absent.
+    """
+    return raw.replace('\r\n', '\n').replace('\r', '\n')
+
+
 def validate_wheel(wheel_path):
     """Validate a wheel file's structure and metadata."""
     errors = []
@@ -87,12 +102,15 @@ def validate_wheel(wheel_path):
             
             # Verify METADATA content. Match the Version header itself:
             # "Version:" is a substring of "Metadata-Version:".
+            # setuptools keeps the name from setup.py; the wheel package's
+            # bdist_wheel writes the PEP 503 form (nvdiffrec-render).
             metadata_found = False
             for fname in files:
                 if fname.endswith('METADATA'):
-                    metadata = zf.read(fname).decode('utf-8')
-                    if 'Name: nvdiffrec_render' not in metadata:
-                        errors.append("METADATA missing package name 'nvdiffrec_render'")
+                    metadata = metadata_text(zf.read(fname).decode('utf-8'))
+                    name_match = re.search(r'(?m)^Name:[ \t]*(\S+)[ \t]*$', metadata)
+                    if name_match is None or canonical_distribution_name(name_match.group(1)) != canonical_distribution_name('nvdiffrec_render'):
+                        errors.append("METADATA package name is not nvdiffrec_render")
                     version_match = re.search(r'(?m)^Version:[ \t]*(\S+)[ \t]*$', metadata)
                     if version_match is None:
                         errors.append("METADATA missing Version field")

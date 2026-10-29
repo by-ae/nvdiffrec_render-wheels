@@ -29,6 +29,13 @@ def build_wheel(directory: Path, metadata: str, filename: str = WHEEL_NAME) -> P
     return path
 
 
+WINDOWS_METADATA = (
+    "Metadata-Version: 2.1\r\n"
+    "Name: nvdiffrec-render\r\n"
+    "Version: 0.0.1+cu128torch29\r\n"
+)
+
+
 class ValidateWheelTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -60,6 +67,45 @@ class ValidateWheelTest(unittest.TestCase):
         errors, warnings = validate_wheel.validate_wheel(str(path))
         self.assertEqual(errors, [], errors)
         self.assertEqual(warnings, [])
+
+    def test_windows_metadata_name_and_crlf_are_accepted(self):
+        """The wheel package normalizes the name and writes CRLF on Windows.
+
+        A published cu128 Windows wheel has Name: nvdiffrec-render and
+        Version lines ending in CR. Treating that as a missing name and a
+        missing version fails the build after the wheel is already good.
+        """
+        path = build_wheel(self.directory, WINDOWS_METADATA)
+        errors, warnings = validate_wheel.validate_wheel(str(path))
+        self.assertEqual(errors, [], errors)
+        self.assertEqual(warnings, [])
+
+    def test_crlf_version_mismatch_is_still_reported(self):
+        metadata = WINDOWS_METADATA.replace(
+            "Version: 0.0.1+cu128torch29\r\n",
+            "Version: 0.0.1\r\n",
+        )
+        path = build_wheel(self.directory, metadata)
+        errors, _warnings = validate_wheel.validate_wheel(str(path))
+        self.assertTrue(any("does not match filename version" in error for error in errors), errors)
+        self.assertFalse(any("missing Version field" in error for error in errors), errors)
+
+    def test_crlf_metadata_without_a_version_header_is_rejected(self):
+        metadata = (
+            "Metadata-Version: 2.1\r\n"
+            "Name: nvdiffrec-render\r\n"
+        )
+        path = build_wheel(self.directory, metadata)
+        errors, _warnings = validate_wheel.validate_wheel(str(path))
+        self.assertTrue(any("missing Version field" in error for error in errors), errors)
+
+    def test_unrelated_package_name_is_rejected(self):
+        path = build_wheel(
+            self.directory,
+            "Metadata-Version: 2.4\nName: other-package\nVersion: 0.0.1+cu128torch29\n",
+        )
+        errors, _warnings = validate_wheel.validate_wheel(str(path))
+        self.assertTrue(any("package name" in error for error in errors), errors)
 
     def test_cli_validates_every_wheel_argument(self):
         good = build_wheel(
