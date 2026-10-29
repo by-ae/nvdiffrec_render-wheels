@@ -18,7 +18,7 @@ env:
   PYTORCH_VERSION: '2.5.1'
   TORCH_SHORT: '251'
   TORCH_MM: '25'
-  TORCH_CUDA_ARCH_LIST: '7.5;8.6;8.9;9.0'
+  TORCH_CUDA_ARCH_LIST: '7.5;8.0;8.6;8.9;9.0'
 
 jobs:
   build-linux:
@@ -225,7 +225,7 @@ jobs:
           set "CUDA_HOME=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
           set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
           set FORCE_CUDA=1
-          set TORCH_CUDA_ARCH_LIST=7.5;8.6;8.9;9.0
+          set TORCH_CUDA_ARCH_LIST=${{ env.TORCH_CUDA_ARCH_LIST }}
           set NVDIFFREC_LOCAL_VERSION=cu${{ env.CUDA_SHORT }}torch${{ env.TORCH_MM }}
           pip install --no-build-isolation .
           python setup.py bdist_wheel
@@ -282,7 +282,7 @@ jobs:
             **Supported:**
             - Python: 3.10, 3.11, 3.12
             - Platforms: Linux (x86_64), Windows (amd64)
-            - GPU: RTX 20/30/40/50 series, A100, B100/B200
+            - GPU: compute capability 7.5, 8.0, 8.6, 8.9, 9.0
           files: wheels/*.whl
           fail_on_unmatched_files: true
           make_latest: false

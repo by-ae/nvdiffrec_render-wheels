@@ -214,6 +214,56 @@ class ReadmeCompatibilityTest(unittest.TestCase):
             self.assertIn("\n        run: ./publish_index_update.sh\n", text, path.name)
             self.assertNotIn("- '.github/workflows/build-cu*-torch*.yml'", text)
 
+    def test_arch_lists_include_sm80_and_match_the_toolkit(self):
+        """8.0 was removed from every Linux list while fixing Windows.
+
+        CUDA 12.4 and 12.6 can compile 8.0. They cannot compile 10.0 or
+        12.0. Windows used to carry a second literal list, so the two
+        sides drifted.
+        """
+        for workflow in self.workflows:
+            path = WORKFLOWS / f"build-{workflow['name']}.yml"
+            text = path.read_text(encoding="utf-8")
+            match = re.search(r"(?m)^  TORCH_CUDA_ARCH_LIST: '([^']+)'", text)
+            self.assertIsNotNone(match, path.name)
+            archs = match.group(1).split(";")
+            self.assertIn("8.0", archs, path.name)
+            self.assertNotIn("RTX 20/30/40/50 series, A100, B100/B200", text)
+            if workflow["windows"]:
+                self.assertEqual(text.count("set TORCH_CUDA_ARCH_LIST="), 1, path.name)
+                self.assertIn(
+                    "set TORCH_CUDA_ARCH_LIST=${{ env.TORCH_CUDA_ARCH_LIST }}",
+                    text,
+                    path.name,
+                )
+                self.assertIsNone(
+                    re.search(r"set TORCH_CUDA_ARCH_LIST=[0-9]", text),
+                    path.name,
+                )
+            else:
+                self.assertNotIn("set TORCH_CUDA_ARCH_LIST=", text, path.name)
+            if workflow["cuda"] in {"12.4", "12.6"}:
+                self.assertNotIn("10.0", archs, path.name)
+                self.assertNotIn("12.0", archs, path.name)
+                self.assertIn("compute capability 7.5, 8.0, 8.6, 8.9, 9.0", text)
+            if workflow["cuda"] in {"12.8", "13.0"}:
+                self.assertIn("10.0", archs, path.name)
+                self.assertIn("12.0", archs, path.name)
+                self.assertIn(
+                    "compute capability 7.5, 8.0, 8.6, 8.9, 9.0, 10.0, 12.0",
+                    text,
+                )
+
+    def test_readme_states_published_compute_capabilities(self):
+        self.assertNotIn("RTX 20/30/40/50 series, A100, B100/B200", self.readme)
+        section = self.readme.split("## GPU architectures", 1)
+        self.assertEqual(len(section), 2)
+        body = section[1].split("## ", 1)[0]
+        self.assertIn("| 12.4 and 12.6 | 7.5, 8.6, 8.9, 9.0 |", body)
+        self.assertIn("| 12.8 | 7.5, 8.6, 8.9, 9.0, 10.0, 12.0 |", body)
+        self.assertIn("8.0 (A100) is not in any published file", body)
+        self.assertIn("do not request 10.0 or 12.0", body)
+
     def test_cu130_is_described_as_unpublished(self):
         workflow = self.by_name["cu130-torch291"]
         self.assertEqual(workflow["linux"], ["3.10", "3.11", "3.12", "3.13"])
