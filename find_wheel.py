@@ -178,9 +178,13 @@ def discover_configs(wheels_dir: Path) -> List[dict]:
         # CUDA: 128 -> (12, 8), 130 -> (13, 0)
         cuda_tuple = parse_cuda_version(cuda_short)
         
-        # PyTorch: 291 -> (2, 9, 1), 280 -> (2, 8, 0)
+        # PyTorch: 291 -> (2, 9, 1), 2150 -> (2, 15, 0). Four digits are a
+        # two-digit minor, which 2.10 and later need. The index generator
+        # uses the same split.
         if len(torch_short) == 3:
             torch_tuple = (int(torch_short[0]), int(torch_short[1]), int(torch_short[2]))
+        elif len(torch_short) == 4:
+            torch_tuple = (int(torch_short[0]), int(torch_short[1:3]), int(torch_short[3]))
         elif len(torch_short) == 2:
             torch_tuple = (int(torch_short[0]), int(torch_short[1]), 0)
         else:

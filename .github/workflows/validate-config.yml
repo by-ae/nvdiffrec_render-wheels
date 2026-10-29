@@ -17,6 +17,7 @@ on:
       - 'test_generate_config_index.py'
       - 'test_validate_index.py'
       - 'generate_root_index.py'
+      - 'test_generate_root_index.py'
       - 'test_readme_compatibility.py'
       - 'README.md'
   push:
@@ -36,6 +37,7 @@ on:
       - 'test_generate_config_index.py'
       - 'test_validate_index.py'
       - 'generate_root_index.py'
+      - 'test_generate_root_index.py'
       - 'test_readme_compatibility.py'
       - 'README.md'
 
@@ -74,6 +76,10 @@ jobs:
       - name: Test config index generator
         run: |
           python test_generate_config_index.py
+
+      - name: Test root index generator
+        run: |
+          python test_generate_root_index.py
 
       - name: Test index publish script
         run: |

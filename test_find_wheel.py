@@ -115,21 +115,27 @@ class TestConfigDiscovery(unittest.TestCase):
         (wheels_dir / 'cu128-torch291').mkdir(parents=True)
         (wheels_dir / 'cu126-torch280').mkdir(parents=True)
         (wheels_dir / 'cu124-torch251').mkdir(parents=True)
+        (wheels_dir / 'cu130-torch2150').mkdir(parents=True)
         
         configs = find_wheel.discover_configs(wheels_dir)
         
-        self.assertEqual(len(configs), 3)
+        self.assertEqual(len(configs), 4)
         
         # Check parsed values
         config_names = [c['name'] for c in configs]
         self.assertIn('cu128-torch291', config_names)
         self.assertIn('cu126-torch280', config_names)
         self.assertIn('cu124-torch251', config_names)
+        self.assertIn('cu130-torch2150', config_names)
         
         # Check cu128-torch291 parsing
         cu128_config = next(c for c in configs if c['name'] == 'cu128-torch291')
         self.assertEqual(cu128_config['cuda'], (12, 8))
         self.assertEqual(cu128_config['torch'], (2, 9, 1))
+        # 2.15.0 strips to four digits. Three-digit parsing would reject it.
+        cu130_config = next(c for c in configs if c['name'] == 'cu130-torch2150')
+        self.assertEqual(cu130_config['cuda'], (13, 0))
+        self.assertEqual(cu130_config['torch'], (2, 15, 0))
     
     def test_discover_empty_directory(self):
         """Test discovery with empty wheels directory."""
