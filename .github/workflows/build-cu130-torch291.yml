@@ -25,7 +25,7 @@ env:
   PYTORCH_VERSION: '2.9.1'
   TORCH_SHORT: '291'
   TORCH_MM: '29'
-  TORCH_CUDA_ARCH_LIST: '7.5;8.6;8.9;9.0;10.0;12.0'
+  TORCH_CUDA_ARCH_LIST: '7.5;8.0;8.6;8.9;9.0;10.0;12.0'
 
 jobs:
   build-linux:
@@ -181,7 +181,7 @@ jobs:
             **Supported:**
             - Python: 3.10, 3.11, 3.12, 3.13
             - Platforms: Linux (x86_64)
-            - GPU: RTX 20/30/40/50 series, A100, B100/B200
+            - GPU: compute capability 7.5, 8.0, 8.6, 8.9, 9.0, 10.0, 12.0
           files: wheels/*.whl
           fail_on_unmatched_files: true
           make_latest: false

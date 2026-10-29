@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Helper script to find the correct nvdiffrec_render wheel for your environment.
-Detects Python version, PyTorch version, and CUDA version, then suggests the
-matching wheel configuration or the nearest available alternative.
+Detects Python version, PyTorch version, and CUDA version, then prints an
+install command only when both match a published config. A wheel built for
+a different PyTorch or CUDA version will not import.
 """
 import sys
 import os
@@ -177,9 +178,13 @@ def discover_configs(wheels_dir: Path) -> List[dict]:
         # CUDA: 128 -> (12, 8), 130 -> (13, 0)
         cuda_tuple = parse_cuda_version(cuda_short)
         
-        # PyTorch: 291 -> (2, 9, 1), 280 -> (2, 8, 0)
+        # PyTorch: 291 -> (2, 9, 1), 2150 -> (2, 15, 0). Four digits are a
+        # two-digit minor, which 2.10 and later need. The index generator
+        # uses the same split.
         if len(torch_short) == 3:
             torch_tuple = (int(torch_short[0]), int(torch_short[1]), int(torch_short[2]))
+        elif len(torch_short) == 4:
+            torch_tuple = (int(torch_short[0]), int(torch_short[1:3]), int(torch_short[3]))
         elif len(torch_short) == 2:
             torch_tuple = (int(torch_short[0]), int(torch_short[1]), 0)
         else:
@@ -496,37 +501,21 @@ Examples:
         print()
         sys.exit(0)
     
-    # No exact match - suggest nearest or list all
+    # No exact match. torch.version.cuda is the CUDA build PyTorch was
+    # compiled with, not a driver version that can load an older wheel.
     print("❌ No exact match found for your configuration.")
     print()
-    
-    if nearest_match:
-        # Check if Python version is supported
-        if not check_python_version_supported(python_version, nearest_match):
-            print("💡 Nearest match found, but Python version not supported.")
-            print()
-            cuda_str = format_cuda_version(nearest_match['cuda'])
-            torch_str = f"{nearest_match['torch'][0]}.{nearest_match['torch'][1]}.{nearest_match['torch'][2]}"
-            print(f"Config: {nearest_match['name']} (CUDA {cuda_str}, PyTorch {torch_str})")
-            
-            if 'python_range' in nearest_match:
-                min_py, max_py = nearest_match['python_range']
-                print(f"Supported Python: {min_py[0]}.{min_py[1]}-{max_py[0]}.{max_py[1]}")
-            
-            print(f"Your Python: {python_version[0]}.{python_version[1]}")
-        else:
-            cuda_str = format_cuda_version(nearest_match['cuda'])
-            torch_str = f"{nearest_match['torch'][0]}.{nearest_match['torch'][1]}.{nearest_match['torch'][2]}"
-            print(f"💡 Nearest match: {nearest_match['name']}")
-            print(f"   CUDA {cuda_str}, PyTorch {torch_str}")
-            print()
-            print("Install command:")
-            print(f"  {format_pip_command(nearest_match['name'], args.base_url)}")
-            print()
-            print("Note: This may work if your CUDA runtime is backward-compatible,")
-            print("but for best results, install PyTorch matching an available config.")
-    
+    print("The extension loads only in the PyTorch build it was compiled against.")
+    print("There is no install command for a different PyTorch or CUDA version.")
     print()
+
+    if nearest_match:
+        cuda_str = format_cuda_version(nearest_match['cuda'])
+        torch_str = f"{nearest_match['torch'][0]}.{nearest_match['torch'][1]}.{nearest_match['torch'][2]}"
+        print(f"Closest published config is {nearest_match['name']} (CUDA {cuda_str}, PyTorch {torch_str}).")
+        print("Installing that wheel into this environment will not import.")
+        print()
+
     print("Available configurations:")
     for config in configs:
         cuda_str = format_cuda_version(config['cuda'])

@@ -17,16 +17,34 @@ import sys
 import validate_index
 
 
+def torch_from_short(torch_short: str):
+    """Return '2.9.1' or '2.15.0' from a dot-stripped PyTorch tag.
+
+    Three digits are one digit per component (2.9.1 -> 291). Four digits
+    are a one-digit major, a two-digit minor, and a one-digit patch
+    (2.15.0 -> 2150). Other lengths are ambiguous and rejected.
+    """
+    if len(torch_short) == 3:
+        major, minor, patch = torch_short[0], torch_short[1], torch_short[2]
+    elif len(torch_short) == 4:
+        major, minor, patch = torch_short[0], torch_short[1:3], torch_short[3]
+    else:
+        return None
+    return f"{int(major)}.{int(minor)}.{int(patch)}"
+
+
 def versions_from_dirname(name: str):
     """Return (cuda, torch) display strings for cu128-torch291, or None."""
     match = re.fullmatch(r'cu(\d+)-torch(\d+)', name)
     if not match:
         return None
     cuda_short, torch_short = match.groups()
-    if len(cuda_short) not in (3, 4) or len(torch_short) != 3:
+    if len(cuda_short) not in (3, 4):
+        return None
+    torch = torch_from_short(torch_short)
+    if torch is None:
         return None
     cuda = f"{int(cuda_short[:2])}.{int(cuda_short[2:])}"
-    torch = f"{int(torch_short[0])}.{int(torch_short[1])}.{int(torch_short[2])}"
     return cuda, torch
 
 

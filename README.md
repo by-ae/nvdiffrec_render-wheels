@@ -4,7 +4,7 @@ Pre-built Python wheels for `nvdiffrec_render` (rendering utilities from [NVlabs
 
 ## Requirements
 
-- **NVIDIA GPU** with compute capability 7.5+ (RTX 20/30/40/50 series, A100, B100/B200)
+- **NVIDIA GPU** at a compute capability the wheel was compiled for (see below)
 - **CUDA runtime** matching your chosen wheel version (see table below)
 - **PyTorch** matching your chosen wheel version
 - **Platform**: Linux (x86_64) or Windows (amd64)
@@ -20,6 +20,8 @@ pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_rend
 ```
 
 Use that command when PyTorch is 2.9.1 built for CUDA 12.8. For any other combination, use the matching configuration below, or run `python find_wheel.py`.
+
+Install that PyTorch build first. Every published wheel depends on `torch>=2.5.0`. If torch is missing, pip installs the PyPI build, which is not the CUDA build the wheel was compiled against.
 
 ### Install Specific Configuration
 
@@ -64,7 +66,7 @@ Or run it directly from the repository without cloning:
 curl -sL https://raw.githubusercontent.com/by-ae/nvdiffrec_render-wheels/main/find_wheel.py | python
 ```
 
-The script auto-detects your Python, PyTorch, and CUDA versions. If PyTorch isn't installed yet, specify your target versions manually:
+The script auto-detects your Python, PyTorch, and CUDA versions. It prints an install command only when both match a published config. A nearby CUDA or PyTorch version is a different build, and that wheel will not import. If PyTorch isn't installed yet, specify your target versions manually:
 
 ```bash
 python find_wheel.py --torch 2.9.1 --cuda 12.8 --python 3.11
@@ -100,11 +102,22 @@ python --version
 
 Each row is a set of wheels linked from this repo's index. The build workflow installs that PyTorch version from the official index at `https://download.pytorch.org/whl/cu124`, `cu126`, or `cu128`.
 
+## GPU architectures
+
+A wheel runs only on the compute capabilities it was compiled for. Anything else fails at kernel launch with no kernel image for that device.
+
+Wheels on the index today contain these cubins:
+
+| CUDA wheels | Compute capabilities |
+|-------------|----------------------|
+| 12.4 and 12.6 | 7.5, 8.6, 8.9, 9.0 |
+| 12.8 | 7.5, 8.6, 8.9, 9.0, 10.0, 12.0 |
+
+7.5 is RTX 20-series, 8.6 is RTX 30-series, 8.9 is RTX 40-series, and 9.0 includes H100. The CUDA 12.8 wheels also include 10.0 (B100/B200) and 12.0 (RTX 50-series). Compute capability 8.0 (A100) is not in any published file. The build workflows now request 8.0 as well, so that cubin is in the next build of a configuration, not in the files pip installs today. CUDA 12.4 and 12.6 builds still do not request 10.0 or 12.0.
+
 ## Not published yet
 
-CUDA 13.0 + PyTorch 2.9.1 (`cu130-torch291`) has a Linux-only workflow, `build-cu130-torch291.yml`, for Python 3.10, 3.11, 3.12, and 3.13. It installs PyTorch from `https://download.pytorch.org/whl/cu130`. The GitHub release `cu130-torch291` currently has no wheel assets, and [its index page](https://by-ae.github.io/nvdiffrec_render-wheels/cu130-torch291/) has no files for pip. There is no install command until that release contains wheels.
-
-**GPU Support:** RTX 20/30/40/50 series (SM 7.5+)
+CUDA 13.0 + PyTorch 2.9.1 (`cu130-torch291`) has a Linux-only workflow, `build-cu130-torch291.yml`, for Python 3.10, 3.11, 3.12, and 3.13. It installs PyTorch from `https://download.pytorch.org/whl/cu130`. The GitHub release `cu130-torch291` currently has no wheel assets, and [its index page](https://by-ae.github.io/nvdiffrec_render-wheels/cu130-torch291/) has no files for pip. There is no install command until that release contains wheels. That workflow requests compute capabilities 7.5, 8.0, 8.6, 8.9, 9.0, 10.0, and 12.0.
 
 ## Troubleshooting
 
