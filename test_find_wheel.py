@@ -65,6 +65,17 @@ class TestVersionParsing(unittest.TestCase):
         with self.assertRaises(ValueError):
             find_wheel.parse_cuda_version('12')
 
+    def test_parse_python_version(self):
+        """A patch version is ignored; non-numeric text is an error."""
+        self.assertEqual(find_wheel.parse_python_version('3.11'), (3, 11))
+        self.assertEqual(find_wheel.parse_python_version('3.11.4'), (3, 11))
+        with self.assertRaises(ValueError):
+            find_wheel.parse_python_version('abc')
+        with self.assertRaises(ValueError):
+            find_wheel.parse_python_version('3')
+        with self.assertRaises(ValueError):
+            find_wheel.parse_python_version('3.x')
+
 
 class TestConfigDiscovery(unittest.TestCase):
     """Test configuration discovery from wheels directory."""
@@ -170,6 +181,43 @@ class TestConfigDiscovery(unittest.TestCase):
         
         self.assertEqual(len(configs), 1)
         self.assertEqual(configs[0]['name'], 'cu128-torch291')
+
+    def test_directory_scan_skips_an_index_with_no_wheel(self):
+        """A config page with no wheel file is not an installable config."""
+        wheels_dir = Path(self.test_dir)
+        empty = wheels_dir / 'cu130-torch291'
+        empty.mkdir(parents=True)
+        (empty / 'index.html').write_text(
+            '<h2>No wheels published yet</h2>'
+            '<p>No wheel files are published for this release yet.</p>',
+            encoding='utf-8',
+        )
+        (wheels_dir / 'cu128-torch291').mkdir()
+        broken = wheels_dir / 'cu126-torch280'
+        broken.mkdir()
+        (broken / 'index.html').write_text(
+            '<a href="nvdiffrec_render-0.0.1+cu126torch28-cp310+cu126torch28-cp310-cp310-linux_x86_64.whl">bad</a>',
+            encoding='utf-8',
+        )
+
+        configs = find_wheel.discover_configs(wheels_dir)
+
+        self.assertEqual([c['name'] for c in configs], ['cu128-torch291'])
+
+    def test_directory_scan_reads_platforms_from_wheel_links(self):
+        """A config index's wheel hrefs are the platform tags pip can install."""
+        wheels_dir = Path(self.test_dir)
+        config_dir = wheels_dir / 'cu128-torch291'
+        config_dir.mkdir(parents=True)
+        (config_dir / 'index.html').write_text(
+            '<a href="nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-win_amd64.whl">w</a>',
+            encoding='utf-8',
+        )
+
+        configs = find_wheel.discover_configs(wheels_dir)
+
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0]['platforms'], {'win_amd64'})
 
 
 class TestConfigMatching(unittest.TestCase):
@@ -357,6 +405,15 @@ class TestPipCommandFormatting(unittest.TestCase):
         expected = 'pip install nvdiffrec_render --find-links https://example.com/wheels/cu128-torch291/'
         self.assertEqual(cmd, expected)
 
+    def test_format_pip_command_adds_a_slash(self):
+        """A base URL without a trailing slash still separates the config name."""
+        cmd = find_wheel.format_pip_command(
+            'cu128-torch291',
+            'https://example.com/wheels',
+        )
+        expected = 'pip install nvdiffrec_render --find-links https://example.com/wheels/cu128-torch291/'
+        self.assertEqual(cmd, expected)
+
 
 class TestPythonRangeParsing(unittest.TestCase):
     """Test Python version range parsing."""
@@ -531,6 +588,19 @@ class TestFetchRemoteIndex(unittest.TestCase):
             self.assertIsNone(result)
 
 
+class TestScriptWheelsDirectory(unittest.TestCase):
+    def test_stdin_has_no_local_wheels_directory(self):
+        self.assertIsNone(find_wheel.wheels_dir_for_script(None))
+        self.assertIsNone(find_wheel.wheels_dir_for_script(''))
+        self.assertIsNone(find_wheel.wheels_dir_for_script('<stdin>'))
+        self.assertIsNone(find_wheel.wheels_dir_for_script('-'))
+        script = Path(__file__).resolve()
+        self.assertEqual(
+            find_wheel.wheels_dir_for_script(str(script)),
+            script.parent / 'wheels',
+        )
+
+
 class TestHostPlatform(unittest.TestCase):
     def test_published_tags(self):
         self.assertEqual(find_wheel.host_wheel_platform("Linux", "x86_64"), "linux_x86_64")
@@ -623,6 +693,62 @@ class TestInstallCommand(unittest.TestCase):
         message = find_wheel.platform_refusal("linux_x86_64", configs[0])
         self.assertIn("no linux_x86_64 wheel", message)
         self.assertIsNone(find_wheel.platform_refusal("win_amd64", configs[0]))
+
+    def test_non_numeric_python_exits_without_a_traceback(self):
+        result = self.run_finder("--torch", "2.9.1", "--cuda", "12.8", "--python", "abc")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Invalid Python version format", result.stderr)
+        self.assertIn("Expected format: X.Y", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("Traceback", result.stdout)
+
+    def test_python_patch_still_matches(self):
+        result = self.run_finder("--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11.4")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cu128-torch291/", result.stdout)
+
+    def test_piped_script_ignores_wheels_in_the_working_directory(self):
+        script = (Path(__file__).resolve().parent / "find_wheel.py").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            wheels = Path(tmp) / "wheels"
+            wheels.mkdir()
+            (wheels / "index.html").write_text(
+                '<tr><td>11.1</td><td>1.2.3</td><td>3.10-3.13</td>'
+                '<td><a href="cu111-torch123/">cu111-torch123</a></td></tr>\n',
+                encoding="utf-8",
+            )
+            piped = subprocess.run(
+                [sys.executable, "-", "--torch", "1.2.3", "--cuda", "11.1", "--python", "3.11"],
+                input=script,
+                text=True,
+                capture_output=True,
+                cwd=tmp,
+                check=False,
+            )
+            combined = piped.stdout + piped.stderr
+            self.assertNotIn("cu111-torch123", combined)
+            self.assertNotIn("Traceback", combined)
+
+            local = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve().parent / "find_wheel.py"),
+                    "--wheels-dir",
+                    str(wheels),
+                    "--torch",
+                    "1.2.3",
+                    "--cuda",
+                    "11.1",
+                    "--python",
+                    "3.11",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(local.returncode, 0, local.stderr)
+        self.assertIn("cu111-torch123/", local.stdout)
+        self.assertEqual(local.stdout.count("pip install"), 1)
 
 
 if __name__ == '__main__':

@@ -12,7 +12,7 @@ import re
 import argparse
 import platform
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Set, Tuple, List
 from urllib.request import urlopen
 from urllib.error import URLError
 
@@ -62,6 +62,18 @@ def parse_cuda_version(cuda_str: str) -> Tuple[int, int]:
 def format_cuda_version(cuda_tuple: Tuple[int, int]) -> str:
     """Format CUDA tuple (12, 8) as '12.8'."""
     return f"{cuda_tuple[0]}.{cuda_tuple[1]}"
+
+
+def parse_python_version(version_str: str) -> Tuple[int, int]:
+    """Parse '3.11' or '3.11.4' into (major, minor).
+
+    A patch version is ignored. Non-numeric text is rejected here so the
+    command line can report it without a traceback.
+    """
+    parts = version_str.split('.')
+    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        raise ValueError(f"Invalid Python version format: {version_str}")
+    return (int(parts[0]), int(parts[1]))
 
 
 def parse_python_range(range_str: str) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
@@ -174,6 +186,49 @@ def platform_refusal(host_platform: Optional[str], config: dict) -> Optional[str
     return None
 
 
+def installable_platforms(page: str) -> Optional[Set[str]]:
+    """Platform tags of wheel links on a config index page.
+
+    Returns None when the page has no wheel href pip could install. A
+    directory named like a config is not enough: cu130-torch291 publishes
+    an index that says no wheels.
+    """
+    try:
+        from validate_index import wheel_href_error
+    except ImportError:
+        wheel_href_error = None
+
+    tags = set()
+    for href in re.findall(r'href="([^"]*)"', page):
+        path = href.partition('#')[0]
+        if not path.endswith('.whl'):
+            continue
+        filename = path.rsplit('/', 1)[-1]
+        if wheel_href_error is not None:
+            if wheel_href_error(href):
+                continue
+        elif not filename.startswith('nvdiffrec_render-'):
+            continue
+        match = re.search(r'-(linux_x86_64|win_amd64)\.whl$', filename)
+        if match:
+            tags.add(match.group(1))
+    if not tags:
+        return None
+    return tags
+
+
+def wheels_dir_for_script(script_file: Optional[str]) -> Optional[Path]:
+    """Wheels directory next to the script file.
+
+    A script read from stdin has no path. Treating ``<stdin>`` as a path
+    would search a wheels directory in the working directory and hide the
+    published index.
+    """
+    if not script_file or script_file in ('<stdin>', '-'):
+        return None
+    return Path(script_file).resolve().parent / 'wheels'
+
+
 def fetch_remote_index(url: str, timeout: int = 10) -> Optional[str]:
     """
     Fetch the remote index.html.
@@ -251,11 +306,12 @@ def discover_configs(wheels_dir: Path) -> List[dict]:
             try:
                 page = index_path.read_text(encoding='utf-8')
             except (OSError, UnicodeDecodeError):
-                page = ''
-            # A config page's wheel links all belong to this directory.
-            tags = set(re.findall(r'-(linux_x86_64|win_amd64)\.whl', page))
-            if tags:
-                config['platforms'] = tags
+                continue
+            # No wheel href means pip cannot install from this page.
+            tags = installable_platforms(page)
+            if tags is None:
+                continue
+            config['platforms'] = tags
         configs.append(config)
     
     # Sort by PyTorch version (descending), then CUDA version (descending)
@@ -345,8 +401,13 @@ def detect_environment() -> Tuple[Tuple[int, int], Optional[Tuple[int, int, int]
 
 
 def format_pip_command(config_name: str, base_url: str) -> str:
-    """Format the pip install command for a given config."""
-    return f"pip install nvdiffrec_render --find-links {base_url}{config_name}/"
+    """Format the pip install command for a given config.
+
+    The base URL may omit the trailing slash. Without one, the config name
+    would be glued to the host.
+    """
+    root = base_url.rstrip('/')
+    return f"pip install nvdiffrec_render --find-links {root}/{config_name}/"
 
 
 def main():
@@ -390,20 +451,21 @@ Examples:
     parser.add_argument(
         '--wheels-dir',
         type=str,
-        help='Path to wheels directory (default: ./wheels relative to script)'
+        help='Path to wheels directory (default: wheels next to this script; '
+             'the published index when the script is read from stdin)'
     )
     
     args = parser.parse_args()
     
-    # Determine wheels directory
+    # Determine wheels directory. A piped script has no file path, so a
+    # wheels directory in the working directory must not replace the index.
     if args.wheels_dir:
         wheels_dir = Path(args.wheels_dir)
     else:
-        script_dir = Path(__file__).parent
-        wheels_dir = script_dir / 'wheels'
-    
+        wheels_dir = wheels_dir_for_script(globals().get('__file__'))
+
     # Discover available configurations
-    configs = discover_configs(wheels_dir)
+    configs = discover_configs(wheels_dir) if wheels_dir is not None else []
     
     # If no configs found and --wheels-dir was not explicitly given, try remote fallback
     if not configs and not args.wheels_dir:
@@ -424,7 +486,10 @@ Examples:
         
         if not configs:
             print("Error: No wheel configurations found.", file=sys.stderr)
-            print(f"Local directory does not exist: {wheels_dir}", file=sys.stderr)
+            if wheels_dir is None:
+                print("The script has no file path, so no local wheels directory was searched.", file=sys.stderr)
+            else:
+                print(f"Local directory does not exist: {wheels_dir}", file=sys.stderr)
             if html:
                 print(f"Remote index was fetched but contained no configs", file=sys.stderr)
             else:
@@ -449,12 +514,12 @@ Examples:
     
     # Override with command-line arguments
     if args.python:
-        parts = args.python.split('.')
-        if len(parts) < 2:
-            print(f"Error: Invalid Python version format: {args.python}", file=sys.stderr)
+        try:
+            python_version = parse_python_version(args.python)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
             print("Expected format: X.Y (e.g., 3.11)", file=sys.stderr)
             sys.exit(1)
-        python_version = (int(parts[0]), int(parts[1]))
     
     if args.torch:
         try:
