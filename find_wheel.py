@@ -2,13 +2,15 @@
 """
 Helper script to find the correct nvdiffrec_render wheel for your environment.
 Detects Python version, PyTorch version, and CUDA version, then prints an
-install command only when both match a published config. A wheel built for
-a different PyTorch or CUDA version will not import.
+install command only when both match a published config and this machine
+uses a platform tag that config publishes. A wheel built for a different
+PyTorch, CUDA, or platform tag will not install.
 """
 import sys
 import os
 import re
 import argparse
+import platform
 from pathlib import Path
 from typing import Optional, Tuple, List
 from urllib.request import urlopen
@@ -84,6 +86,7 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
     <tr><td>CUDA</td><td>PyTorch</td><td>Python</td><td><a href="cuXXX-torchYYY/">...</a></td></tr>
     """
     configs = []
+    platforms = platforms_by_config(html)
     
     # Find all table rows with config links
     # Pattern: <tr><td>13.0</td><td>2.9.1</td><td>3.10-3.13</td><td><a href="cu130-torch291/">cu130-torch291</a></td></tr>
@@ -110,6 +113,10 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
             
             if python_range:
                 config['python_range'] = python_range
+
+            config_platforms = platforms.get(config_name)
+            if config_platforms:
+                config['platforms'] = config_platforms
             
             configs.append(config)
             
@@ -121,6 +128,50 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
     configs.sort(key=lambda c: (c['torch'], c['cuda']), reverse=True)
     
     return configs
+
+
+def platforms_by_config(html: str) -> dict:
+    """Map a config name to the platform tags linked from an index page.
+
+    Root-index wheel URLs look like ``.../cu128-torch291/name-linux_x86_64.whl``.
+    """
+    found = {}
+    pattern = r'(cu\d+-torch\d+)/[^"\s<>]*-(linux_x86_64|win_amd64)\.whl'
+    for match in re.finditer(pattern, html):
+        name, tag = match.groups()
+        found.setdefault(name, set()).add(tag)
+    return found
+
+
+def host_wheel_platform(system: str, machine: str) -> Optional[str]:
+    """Return the wheel platform tag this machine can install, or None.
+
+    Published wheels are tagged linux_x86_64 or win_amd64. Other machines
+    get no matching file from pip.
+    """
+    machine_name = machine.lower()
+    if system == "Linux" and machine_name in {"x86_64", "amd64"}:
+        return "linux_x86_64"
+    if system == "Windows" and machine_name in {"amd64", "x86_64"}:
+        return "win_amd64"
+    return None
+
+
+def platform_refusal(host_platform: Optional[str], config: dict) -> Optional[str]:
+    """Return an explanation when this machine cannot install the config."""
+    available = config.get("platforms")
+    if host_platform is None:
+        return (
+            "No published wheel matches this machine.\n"
+            "Wheels are tagged linux_x86_64 or win_amd64."
+        )
+    if available and host_platform not in available:
+        tags = ", ".join(sorted(available))
+        return (
+            f"{config['name']} has no {host_platform} wheel.\n"
+            f"Published platform tags for that config: {tags}"
+        )
+    return None
 
 
 def fetch_remote_index(url: str, timeout: int = 10) -> Optional[str]:
@@ -190,11 +241,22 @@ def discover_configs(wheels_dir: Path) -> List[dict]:
         else:
             continue
         
-        configs.append({
+        config = {
             'name': config_dir.name,
             'cuda': cuda_tuple,
             'torch': torch_tuple,
-        })
+        }
+        index_path = config_dir / 'index.html'
+        if index_path.is_file():
+            try:
+                page = index_path.read_text(encoding='utf-8')
+            except (OSError, UnicodeDecodeError):
+                page = ''
+            # A config page's wheel links all belong to this directory.
+            tags = set(re.findall(r'-(linux_x86_64|win_amd64)\.whl', page))
+            if tags:
+                config['platforms'] = tags
+        configs.append(config)
     
     # Sort by PyTorch version (descending), then CUDA version (descending)
     configs.sort(key=lambda c: (c['torch'], c['cuda']), reverse=True)
@@ -409,8 +471,13 @@ Examples:
             sys.exit(1)
     
     # Display detected environment
+    host_platform = host_wheel_platform(platform.system(), platform.machine())
     print("Detected environment:")
     print(f"  Python: {python_version[0]}.{python_version[1]}")
+    if host_platform:
+        print(f"  Platform: {host_platform}")
+    else:
+        print(f"  Platform: {platform.system()} {platform.machine()} (no published wheel)")
     
     if torch_version:
         torch_str = f"{torch_version[0]}.{torch_version[1]}.{torch_version[2]}"
@@ -494,6 +561,12 @@ Examples:
                 print(f"  {config['name']}: CUDA {cuda_str}, PyTorch {torch_str}{py_range}")
             sys.exit(1)
         
+        refusal = platform_refusal(host_platform, exact_match)
+        if refusal:
+            print(refusal)
+            print()
+            sys.exit(1)
+
         print("✅ Found exact match!")
         print()
         print("Install command:")

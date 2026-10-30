@@ -3,11 +3,13 @@
 Unit tests for find_wheel.py.
 Tests version parsing, config discovery, matching logic, and integration scenarios.
 """
+import io
 import subprocess
 import unittest
 import tempfile
 import shutil
 import sys
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -420,6 +422,7 @@ class TestParseConfigsFromIndexHTML(unittest.TestCase):
         if cu128:
             self.assertIn('python_range', cu128)
             self.assertEqual(cu128['python_range'], ((3, 10), (3, 13)))
+            self.assertEqual(cu128['platforms'], {'linux_x86_64', 'win_amd64'})
     
     def test_parse_mock_index_html(self):
         """Test parsing with mock HTML."""
@@ -528,6 +531,20 @@ class TestFetchRemoteIndex(unittest.TestCase):
             self.assertIsNone(result)
 
 
+class TestHostPlatform(unittest.TestCase):
+    def test_published_tags(self):
+        self.assertEqual(find_wheel.host_wheel_platform("Linux", "x86_64"), "linux_x86_64")
+        self.assertEqual(find_wheel.host_wheel_platform("Linux", "amd64"), "linux_x86_64")
+        self.assertEqual(find_wheel.host_wheel_platform("Windows", "AMD64"), "win_amd64")
+        self.assertEqual(find_wheel.host_wheel_platform("Windows", "x86_64"), "win_amd64")
+
+    def test_unpublished_tags(self):
+        self.assertIsNone(find_wheel.host_wheel_platform("Darwin", "arm64"))
+        self.assertIsNone(find_wheel.host_wheel_platform("Darwin", "x86_64"))
+        self.assertIsNone(find_wheel.host_wheel_platform("Linux", "aarch64"))
+        self.assertIsNone(find_wheel.host_wheel_platform("Windows", "ARM64"))
+
+
 class TestInstallCommand(unittest.TestCase):
     """The script must not print a pip command for a different build."""
 
@@ -562,6 +579,50 @@ class TestInstallCommand(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("pip install", result.stdout)
         self.assertIn("will not import", result.stdout)
+
+    def _run_main(self, argv, system, machine):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with patch.object(sys, "argv", ["find_wheel.py", *argv]), \
+             patch("find_wheel.platform.system", return_value=system), \
+             patch("find_wheel.platform.machine", return_value=machine), \
+             redirect_stdout(stdout), redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                find_wheel.main()
+        return raised.exception.code, stdout.getvalue(), stderr.getvalue()
+
+    def test_windows_exact_match_still_prints_the_install_command(self):
+        code, stdout, stderr = self._run_main(
+            ["--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11"],
+            "Windows",
+            "AMD64",
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("win_amd64", stdout)
+        self.assertIn("cu128-torch291/", stdout)
+        self.assertEqual(stdout.count("pip install"), 1)
+
+    def test_unmatched_platform_does_not_print_an_install_command(self):
+        code, stdout, stderr = self._run_main(
+            ["--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11"],
+            "Darwin",
+            "arm64",
+        )
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("pip install", stdout)
+        self.assertIn("linux_x86_64", stdout)
+        self.assertIn("win_amd64", stdout)
+
+    def test_config_without_this_platform_tag_is_not_offered(self):
+        html = """
+        <tr><td>12.8</td><td>2.9.1</td><td>3.10-3.13</td><td><a href="cu128-torch291/">cu128-torch291</a></td></tr>
+        <a href="https://example.com/cu128-torch291/nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-win_amd64.whl">w</a>
+        """
+        configs = find_wheel.parse_configs_from_index_html(html)
+        self.assertEqual(configs[0]["platforms"], {"win_amd64"})
+        message = find_wheel.platform_refusal("linux_x86_64", configs[0])
+        self.assertIn("no linux_x86_64 wheel", message)
+        self.assertIsNone(find_wheel.platform_refusal("win_amd64", configs[0]))
 
 
 if __name__ == '__main__':
