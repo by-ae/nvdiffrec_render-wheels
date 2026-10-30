@@ -9,6 +9,9 @@ on:
       - 'validate_index.py'
       - 'validate_wheel.py'
       - 'test_validate_wheel.py'
+      - 'test_renderutils_ops.py'
+      - 'test_setup_package.py'
+      - 'renderutils_ops.py'
       - 'find_wheel.py'
       - 'test_find_wheel.py'
       - 'generate_config_index.sh'
@@ -29,6 +32,9 @@ on:
       - 'validate_index.py'
       - 'validate_wheel.py'
       - 'test_validate_wheel.py'
+      - 'test_renderutils_ops.py'
+      - 'test_setup_package.py'
+      - 'renderutils_ops.py'
       - 'find_wheel.py'
       - 'test_find_wheel.py'
       - 'generate_config_index.sh'
@@ -72,6 +78,14 @@ jobs:
       - name: Test wheel archive validator
         run: |
           python test_validate_wheel.py
+
+      - name: Test renderutils ops wrapper
+        run: |
+          python test_renderutils_ops.py
+
+      - name: Test package layout
+        run: |
+          python test_setup_package.py
 
       - name: Test config index generator
         run: |
