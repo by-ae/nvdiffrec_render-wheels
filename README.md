@@ -149,6 +149,17 @@ python -c "import torch; print(torch.version.cuda)"
 
 The root find-links URL installs `0.0.1+cu128torch29`. When `torch.version.cuda` is not `12.8`, or PyTorch is not 2.9.1, install from the matching configuration URL.
 
+### ImportError: cannot import name 'ops'
+
+These published wheels contain `nvdiffrec_render/renderutils/_C` and the dist-info records, and no `ops.py`, so `from nvdiffrec_render.renderutils import ops` fails:
+
+- `cu124-torch251` cp310 (`linux_x86_64` and `win_amd64`)
+- `cu128-torch291` cp312 (`linux_x86_64`)
+
+[`torch_bindings.cpp`](https://github.com/NVlabs/nvdiffrec/blob/master/render/renderutils/c_src/torch_bindings.cpp) exports `xfm_fwd`, `lambert_fwd`, and the other `*_fwd` and `*_bwd` entry points. `xfm_points` and `lambert` are functions in upstream `renderutils/ops.py`.
+
+The build now writes `renderutils/ops.py` into the wheel. That file is in the next build of a configuration, not in the files pip installs today.
+
 ### CUDA out of memory errors
 
 The rendering utilities require GPU memory. Reduce batch sizes or texture resolutions if you encounter OOM errors.
