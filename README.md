@@ -13,19 +13,26 @@ Pre-built Python wheels for `nvdiffrec_render` (rendering utilities from [NVlabs
 
 ### Quick Install
 
-The combined index lists every published wheel. Pip keeps a file when the Python, ABI, and platform tags match your interpreter, then installs the newest version. It does not look at `torch.version.cuda`. Every wheel here is version `0.0.1` plus a local label, and the newest one is `0.0.1+cu128torch29` (CUDA 12.8 + PyTorch 2.9.1, `cu128-torch291`):
+The combined index lists every published wheel. Pip keeps a file when the Python, ABI, and platform tags match your interpreter, then installs the newest version. It does not look at `torch.version.cuda`. Every wheel here is version `0.0.1` plus a local label. On Linux (`linux_x86_64`) the newest matching file is `0.0.1+cu130torch29` (CUDA 13.0 + PyTorch 2.9.1, `cu130-torch291`). On Windows (`win_amd64`) it is `0.0.1+cu128torch29` (CUDA 12.8 + PyTorch 2.9.1, `cu128-torch291`), because the CUDA 13.0 release has no Windows wheel:
 
 ```bash
 pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/
 ```
 
-Use that command when PyTorch is 2.9.1 built for CUDA 12.8. For any other combination, use the matching configuration below, or run `python find_wheel.py`.
+Use that command on Linux when PyTorch is 2.9.1 built for CUDA 13.0, and on Windows when PyTorch is 2.9.1 built for CUDA 12.8. For any other combination, use the matching configuration below, or run `python find_wheel.py`.
 
 Install that PyTorch build first. Every published wheel depends on `torch>=2.5.0`. If torch is missing, pip installs the PyPI build, which is not the CUDA build the wheel was compiled against.
 
 ### Install Specific Configuration
 
 Choose the command matching your CUDA and PyTorch versions:
+
+**CUDA 13.0 + PyTorch 2.9.1** (Linux only, Python 3.10-3.13):
+```bash
+pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu130-torch291/
+```
+
+`build-cu130-torch291.yml` is the Linux-only workflow for that row. It installs PyTorch from `https://download.pytorch.org/whl/cu130`. There is no Windows wheel.
 
 **CUDA 12.8 + PyTorch 2.9.1** (Linux and Windows, Python 3.10-3.13):
 ```bash
@@ -81,9 +88,9 @@ python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {
 ```
 
 Match the output to one of the configurations above. For example:
+- Output: `PyTorch: 2.9.1` and `CUDA: 13.0` → use **cu130-torch291** on Linux. There is no Windows wheel for that pair.
 - Output: `PyTorch: 2.9.1` and `CUDA: 12.8` → use **cu128-torch291**
 - Output: `PyTorch: 2.6.0` and `CUDA: 12.6` → use **cu126-torch260**
-- Output: `PyTorch: 2.9.1` and `CUDA: 13.0` → no wheel is published yet (see below)
 
 You can also check your Python version:
 ```bash
@@ -94,13 +101,14 @@ python --version
 
 | CUDA | PyTorch | Python Versions | Platforms |
 |------|---------|-----------------|-----------|
+| 13.0 | 2.9.1 | 3.10, 3.11, 3.12, 3.13 | Linux only |
 | 12.8 | 2.9.1 | 3.10, 3.11, 3.12, 3.13 | Linux, Windows |
 | 12.8 | 2.8.0 | 3.10, 3.11, 3.12, 3.13 | Linux, Windows |
 | 12.6 | 2.8.0 | 3.10, 3.11, 3.12, 3.13 | Linux, Windows |
 | 12.6 | 2.6.0 | 3.10, 3.11, 3.12, 3.13 | Linux, Windows |
 | 12.4 | 2.5.1 | 3.10, 3.11, 3.12 | Linux, Windows |
 
-Each row is a set of wheels linked from this repo's index. The build workflow installs that PyTorch version from the official index at `https://download.pytorch.org/whl/cu124`, `cu126`, or `cu128`.
+Each row is a set of wheels linked from this repo's index. The build workflow installs that PyTorch version from the official index at `https://download.pytorch.org/whl/cu124`, `cu126`, `cu128`, or `cu130`.
 
 ## GPU architectures
 
@@ -112,12 +120,9 @@ Wheels on the index today contain these cubins:
 |-------------|----------------------|
 | 12.4 and 12.6 | 7.5, 8.6, 8.9, 9.0 |
 | 12.8 | 7.5, 8.6, 8.9, 9.0, 10.0, 12.0 |
+| 13.0 | 7.5, 8.0, 8.6, 8.9, 9.0, 10.0, 12.0 |
 
-7.5 is RTX 20-series, 8.6 is RTX 30-series, 8.9 is RTX 40-series, and 9.0 includes H100. The CUDA 12.8 wheels also include 10.0 (B100/B200) and 12.0 (RTX 50-series). Compute capability 8.0 (A100) is not in any published file. The build workflows now request 8.0 as well, so that cubin is in the next build of a configuration, not in the files pip installs today. CUDA 12.4 and 12.6 builds still do not request 10.0 or 12.0.
-
-## Not published yet
-
-CUDA 13.0 + PyTorch 2.9.1 (`cu130-torch291`) has a Linux-only workflow, `build-cu130-torch291.yml`, for Python 3.10, 3.11, 3.12, and 3.13. It installs PyTorch from `https://download.pytorch.org/whl/cu130`. The GitHub release `cu130-torch291` currently has no wheel assets, and [its index page](https://by-ae.github.io/nvdiffrec_render-wheels/cu130-torch291/) has no files for pip. There is no install command until that release contains wheels. That workflow requests compute capabilities 7.5, 8.0, 8.6, 8.9, 9.0, 10.0, and 12.0.
+7.5 is RTX 20-series, 8.6 is RTX 30-series, 8.9 is RTX 40-series, and 9.0 includes H100. The CUDA 12.8 and 13.0 wheels also include 10.0 (B100/B200) and 12.0 (RTX 50-series). Compute capability 8.0 (A100) is in the CUDA 13.0 wheels only. It is not in the CUDA 12.4, 12.6, or 12.8 files pip installs today. The build workflows now request 8.0 for those configurations as well, so that cubin is in the next build, not in the files currently published for them. CUDA 12.4 and 12.6 builds still do not request 10.0 or 12.0.
 
 ## Troubleshooting
 
@@ -134,7 +139,7 @@ This means pip couldn't find a wheel for your configuration. Common causes:
 
 3. **Wrong platform**: Only Linux (x86_64) and Windows (amd64) are supported
 
-4. **CUDA 13.0 + PyTorch 2.9.1**: that release has no wheel files, so pip cannot install from its index page
+4. **CUDA 13.0 on Windows**: `cu130-torch291` publishes Linux wheels only, so a Windows interpreter finds no file there
 
 5. **Typo in find-links URL**: Make sure to copy the full URL including the configuration subdirectory
 
@@ -147,18 +152,13 @@ The wheel has to be built for the same PyTorch CUDA build you import. Check with
 python -c "import torch; print(torch.version.cuda)"
 ```
 
-The root find-links URL installs `0.0.1+cu128torch29`. When `torch.version.cuda` is not `12.8`, or PyTorch is not 2.9.1, install from the matching configuration URL.
+The root find-links URL installs `0.0.1+cu130torch29` on Linux and `0.0.1+cu128torch29` on Windows. When that file is not the PyTorch build you imported, install from the matching configuration URL.
 
 ### ImportError: cannot import name 'ops'
 
-These published wheels contain `nvdiffrec_render/renderutils/_C` and the dist-info records, and no `ops.py`, so `from nvdiffrec_render.renderutils import ops` fails:
+`from nvdiffrec_render.renderutils import ops` needs `renderutils/ops.py`. [`torch_bindings.cpp`](https://github.com/NVlabs/nvdiffrec/blob/master/render/renderutils/c_src/torch_bindings.cpp) exports `xfm_fwd`, `lambert_fwd`, and the other `*_fwd` and `*_bwd` entry points. `xfm_points` and `lambert` are functions in upstream `renderutils/ops.py`.
 
-- `cu124-torch251` cp310 (`linux_x86_64` and `win_amd64`)
-- `cu128-torch291` cp312 (`linux_x86_64`)
-
-[`torch_bindings.cpp`](https://github.com/NVlabs/nvdiffrec/blob/master/render/renderutils/c_src/torch_bindings.cpp) exports `xfm_fwd`, `lambert_fwd`, and the other `*_fwd` and `*_bwd` entry points. `xfm_points` and `lambert` are functions in upstream `renderutils/ops.py`.
-
-The build now writes `renderutils/ops.py` into the wheel. That file is in the next build of a configuration, not in the files pip installs today.
+The `cu130-torch291` wheels include `renderutils/ops.py`. The wheels linked from `cu124-torch251`, `cu126-torch260`, `cu126-torch280`, `cu128-torch280`, and `cu128-torch291` contain `nvdiffrec_render/renderutils/_C` and the dist-info records, and no `ops.py`, so that import fails. The build writes `renderutils/ops.py` into the wheel. Those five configurations get it on their next build, not in the files pip installs for them today.
 
 ### CUDA out of memory errors
 
