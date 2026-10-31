@@ -29,12 +29,12 @@
 </table>
 
 <h2>Install</h2>
-<p>Pip keeps a wheel when its Python, ABI, and platform tags match this machine, then installs the newest version. It does not look at which PyTorch build is already installed. The newest file here is <code>0.0.1+cu130torch29</code> (CUDA 13.0, PyTorch 2.9.1, <a href="cu130-torch291/">cu130-torch291</a>). Open another configuration above for a different build.</p>
+<p>Pip keeps a wheel when its Python, ABI, and platform tags match this machine, then installs the newest version. It does not look at which PyTorch build is already installed. On <code>linux_x86_64</code> the newest matching file is <code>0.0.1+cu130torch29</code> (CUDA 13.0, PyTorch 2.9.1, <a href="cu130-torch291/">cu130-torch291</a>). On <code>win_amd64</code> the newest matching file is <code>0.0.1+cu128torch29</code> (CUDA 12.8, PyTorch 2.9.1, <a href="cu128-torch291/">cu128-torch291</a>). Open another configuration above for a different build.</p>
 <pre>pip install nvdiffrec_render --find-links https://by-ae.github.io/nvdiffrec_render-wheels/</pre>
 
 <div class="wheels">
 <h2>All Wheels</h2>
-<p>Every published wheel file. On the root page, pip installs only the newest compatible file named above.</p>
+<p>Every published wheel file. Pip installs the newest file above whose tags match this machine.</p>
 <h3>cu124-torch251</h3>
 <a href="https://github.com/by-ae/nvdiffrec_render-wheels/releases/download/cu124-torch251/nvdiffrec_render-0.0.1+cu124torch25-cp310-cp310-linux_x86_64.whl">nvdiffrec_render-0.0.1+cu124torch25-cp310-cp310-linux_x86_64.whl</a><br>
 <a href="https://github.com/by-ae/nvdiffrec_render-wheels/releases/download/cu124-torch251/nvdiffrec_render-0.0.1+cu124torch25-cp310-cp310-win_amd64.whl">nvdiffrec_render-0.0.1+cu124torch25-cp310-cp310-win_amd64.whl</a><br>

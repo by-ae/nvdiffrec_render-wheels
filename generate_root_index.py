@@ -138,34 +138,60 @@ def wheel_version(filename: str) -> str:
     return parts[1]
 
 
-def preferred_release(published):
-    """Return (version, entry) for the file pip installs from the combined index.
+def release_version(entry):
+    """Return the single local version of one configuration.
 
-    Pip keeps wheels whose Python, ABI, and platform tags fit, then selects
-    the newest PEP 440 version. Every published file here is 0.0.1 plus one
-    alphanumeric local label, and ASCII order matches that rule. Refuse other
-    shapes instead of printing a version pip would not pick.
+    Every published file here is 0.0.1 plus one alphanumeric local label,
+    and ASCII order matches pip's PEP 440 order for that shape. Refuse
+    other shapes instead of printing a version pip would not pick.
+    """
+    versions = {wheel_version(name) for name, _href in entry['links']}
+    if len(versions) != 1:
+        raise SystemExit(
+            f"{entry['name']} mixes wheel versions: {sorted(versions)}"
+        )
+    version = next(iter(versions))
+    if '+' not in version:
+        raise SystemExit(f"{entry['name']} has no local version: {version}")
+    public, local = version.split('+', 1)
+    if public != '0.0.1' or not local.isalnum():
+        raise SystemExit(
+            f"Refusing to rank {version}; pip's order is only obvious for "
+            "0.0.1 plus one alphanumeric local label"
+        )
+    return version
+
+
+def preferred_release(published):
+    """Return (version, entry) for the newest published file, ignoring tags."""
+    if not published:
+        raise SystemExit("No published wheels to rank")
+    ranked = [(release_version(entry), entry) for entry in published]
+    return max(ranked, key=lambda item: item[0])
+
+
+def newest_by_platform(published):
+    """Return (platform tag, version, entry) for each tag that has a wheel.
+
+    Pip drops files whose platform tag does not match before it compares
+    versions. A newer linux_x86_64-only file is not what a Windows
+    interpreter installs.
     """
     if not published:
         raise SystemExit("No published wheels to rank")
-    ranked = []
-    for entry in published:
-        versions = {wheel_version(name) for name, _href in entry['links']}
-        if len(versions) != 1:
-            raise SystemExit(
-                f"{entry['name']} mixes wheel versions: {sorted(versions)}"
-            )
-        version = next(iter(versions))
-        if '+' not in version:
-            raise SystemExit(f"{entry['name']} has no local version: {version}")
-        public, local = version.split('+', 1)
-        if public != '0.0.1' or not local.isalnum():
-            raise SystemExit(
-                f"Refusing to rank {version}; pip's order is only obvious for "
-                "0.0.1 plus one alphanumeric local label"
-            )
-        ranked.append((version, entry))
-    return max(ranked, key=lambda item: item[0])
+    chosen = []
+    for tag in ("linux_x86_64", "win_amd64"):
+        ranked = [
+            (release_version(entry), entry)
+            for entry in published
+            if any(name.endswith(f"-{tag}.whl") for name, _href in entry["links"])
+        ]
+        if ranked:
+            version, entry = max(ranked, key=lambda item: item[0])
+            chosen.append((tag, version, entry))
+    if not chosen:
+        raise SystemExit("No published wheels to rank")
+    return chosen
 
 
 def build_html(wheels_dir: Path) -> str:
@@ -204,16 +230,21 @@ def build_html(wheels_dir: Path) -> str:
         )
     html += "</table>\n"
     if published:
-        version, preferred = preferred_release(published)
+        sentences = []
+        for tag, version, entry in newest_by_platform(published):
+            sentences.append(
+                f"On <code>{tag}</code> the newest matching file is "
+                f"<code>{version}</code> "
+                f"(CUDA {entry['cuda']}, PyTorch {entry['torch']}, "
+                f"<a href=\"{entry['name']}/\">{entry['name']}</a>)."
+            )
         html += (
             "\n<h2>Install</h2>\n"
             "<p>Pip keeps a wheel when its Python, ABI, and platform tags match "
             "this machine, then installs the newest version. It does not look at "
-            "which PyTorch build is already installed. The newest file here is "
-            f"<code>{version}</code> "
-            f"(CUDA {preferred['cuda']}, PyTorch {preferred['torch']}, "
-            f"<a href=\"{preferred['name']}/\">{preferred['name']}</a>). "
-            "Open another configuration above for a different build.</p>\n"
+            "which PyTorch build is already installed. "
+            + " ".join(sentences)
+            + " Open another configuration above for a different build.</p>\n"
             "<pre>pip install nvdiffrec_render --find-links "
             "https://by-ae.github.io/nvdiffrec_render-wheels/</pre>\n"
         )
@@ -233,7 +264,7 @@ def build_html(wheels_dir: Path) -> str:
     html += """
 <div class="wheels">
 <h2>All Wheels</h2>
-<p>Every published wheel file. On the root page, pip installs only the newest compatible file named above.</p>
+<p>Every published wheel file. Pip installs the newest file above whose tags match this machine.</p>
 """
     for entry in published:
         html += f"<h3>{entry['name']}</h3>\n"
