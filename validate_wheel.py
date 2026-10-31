@@ -10,6 +10,20 @@ import re
 from pathlib import Path
 
 
+def _print(line=""):
+    """Print a status line when the console cannot encode every character.
+
+    The Windows wheel job uses cp1252. A check mark then raises
+    UnicodeEncodeError after validation has already succeeded, and the
+    job fails before the wheel is uploaded.
+    """
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(encoding, errors="replace").decode(encoding))
+
+
 def wheel_filename_version(filename):
     """Return the version component of a wheel filename, or None.
 
@@ -280,19 +294,19 @@ def main(argv=None):
         errors, warnings = validate_wheel(str(wheel))
         
         if errors:
-            print(f"  ❌ ERRORS:")
+            _print("  ❌ ERRORS:")
             for err in errors:
-                print(f"     - {err}")
+                _print(f"     - {err}")
             total_errors += len(errors)
         
         if warnings:
-            print(f"  ⚠️  WARNINGS:")
+            _print("  ⚠️  WARNINGS:")
             for warn in warnings:
-                print(f"     - {warn}")
+                _print(f"     - {warn}")
             total_warnings += len(warnings)
         
         if not errors and not warnings:
-            print(f"  ✅ Valid")
+            _print("  ✅ Valid")
         
         print()
     

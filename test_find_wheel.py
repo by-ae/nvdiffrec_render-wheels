@@ -681,6 +681,20 @@ class TestInstallCommand(unittest.TestCase):
                 find_wheel.main()
         return raised.exception.code, stdout.getvalue(), stderr.getvalue()
 
+    def test_exact_match_survives_a_cp1252_console(self):
+        raw = io.BytesIO()
+        stdout = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+        stderr = io.StringIO()
+        argv = ["find_wheel.py", "--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11"]
+        with patch.object(sys, "argv", argv), redirect_stdout(stdout), redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                find_wheel.main()
+        self.assertEqual(raised.exception.code, 0, stderr.getvalue())
+        stdout.flush()
+        text = raw.getvalue().decode("cp1252")
+        self.assertIn("cu128-torch291/", text)
+        self.assertIn("pip install", text)
+
     def test_windows_exact_match_still_prints_the_install_command(self):
         code, stdout, stderr = self._run_main(
             ["--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11"],

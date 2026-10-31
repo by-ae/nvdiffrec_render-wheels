@@ -162,6 +162,34 @@ class ValidateWheelTest(unittest.TestCase):
         errors, _warnings = validate_wheel.validate_wheel(str(path))
         self.assertTrue(any("torch_bindings.cpp" in error for error in errors), errors)
 
+    def _run_cli(self, args):
+        raw = io.BytesIO()
+        stdout = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+        with redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as raised:
+                validate_wheel.main(args)
+        stdout.flush()
+        return raised.exception.code, raw.getvalue().decode("cp1252")
+
+    def test_status_line_is_printable_on_cp1252(self):
+        """The Windows wheel job uses cp1252 and used to die on the check mark."""
+        path = build_wheel(
+            self.directory,
+            "Metadata-Version: 2.4\nName: nvdiffrec_render\nVersion: 0.0.1+cu128torch29\n",
+        )
+        code, text = self._run_cli([str(path)])
+        self.assertEqual(code, 0)
+        self.assertIn("Valid", text)
+
+    def test_errors_stay_visible_on_cp1252(self):
+        path = build_wheel(
+            self.directory,
+            "Metadata-Version: 2.4\nName: nvdiffrec_render\nVersion: 0.0.1\n",
+        )
+        code, text = self._run_cli([str(path)])
+        self.assertEqual(code, 1)
+        self.assertIn("does not match filename version", text)
+
     def test_cli_validates_every_wheel_argument(self):
         good = build_wheel(
             self.directory,
