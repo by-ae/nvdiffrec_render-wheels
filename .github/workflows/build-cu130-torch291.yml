@@ -185,7 +185,9 @@ jobs:
       - name: Commit and push index.html
         run: ./publish_index_update.sh
 
-      - name: Trigger Pages deployment
+      - name: Trigger follow-up workflows
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run deploy-pages.yml
+        run: |
+          gh workflow run deploy-pages.yml
+          gh workflow run validate-config.yml

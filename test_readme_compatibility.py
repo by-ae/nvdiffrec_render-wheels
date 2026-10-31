@@ -216,7 +216,11 @@ class ReadmeCompatibilityTest(unittest.TestCase):
             self.assertNotIn("git pull --rebase origin main || true", text)
             self.assertNotIn("git rebase --abort", text, path.name)
             self.assertIn("\n        run: ./publish_index_update.sh\n", text, path.name)
+            self.assertIn("gh workflow run deploy-pages.yml", text, path.name)
+            self.assertIn("gh workflow run validate-config.yml", text, path.name)
             self.assertNotIn("- '.github/workflows/build-cu*-torch*.yml'", text)
+        validate = (WORKFLOWS / "validate-config.yml").read_text(encoding="utf-8")
+        self.assertIn("\n  workflow_dispatch:\n", validate)
 
     def test_arch_lists_include_sm80_and_match_the_toolkit(self):
         """8.0 was removed from every Linux list while fixing Windows.
