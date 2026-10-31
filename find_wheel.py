@@ -2,15 +2,17 @@
 """
 Helper script to find the correct nvdiffrec_render wheel for your environment.
 Detects Python version, PyTorch version, and CUDA version, then prints an
-install command only when both match a published config. A wheel built for
-a different PyTorch or CUDA version will not import.
+install command only when both match a published config and this machine
+uses a platform tag that config publishes. A wheel built for a different
+PyTorch, CUDA, or platform tag will not install.
 """
 import sys
 import os
 import re
 import argparse
+import platform
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Set, Tuple, List
 from urllib.request import urlopen
 from urllib.error import URLError
 
@@ -62,6 +64,18 @@ def format_cuda_version(cuda_tuple: Tuple[int, int]) -> str:
     return f"{cuda_tuple[0]}.{cuda_tuple[1]}"
 
 
+def parse_python_version(version_str: str) -> Tuple[int, int]:
+    """Parse '3.11' or '3.11.4' into (major, minor).
+
+    A patch version is ignored. Non-numeric text is rejected here so the
+    command line can report it without a traceback.
+    """
+    parts = version_str.split('.')
+    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        raise ValueError(f"Invalid Python version format: {version_str}")
+    return (int(parts[0]), int(parts[1]))
+
+
 def parse_python_range(range_str: str) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
     """
     Parse Python version range string like '3.10-3.13' into ((3, 10), (3, 13)).
@@ -84,6 +98,7 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
     <tr><td>CUDA</td><td>PyTorch</td><td>Python</td><td><a href="cuXXX-torchYYY/">...</a></td></tr>
     """
     configs = []
+    platforms = platforms_by_config(html)
     
     # Find all table rows with config links
     # Pattern: <tr><td>13.0</td><td>2.9.1</td><td>3.10-3.13</td><td><a href="cu130-torch291/">cu130-torch291</a></td></tr>
@@ -110,6 +125,10 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
             
             if python_range:
                 config['python_range'] = python_range
+
+            config_platforms = platforms.get(config_name)
+            if config_platforms:
+                config['platforms'] = config_platforms
             
             configs.append(config)
             
@@ -121,6 +140,93 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
     configs.sort(key=lambda c: (c['torch'], c['cuda']), reverse=True)
     
     return configs
+
+
+def platforms_by_config(html: str) -> dict:
+    """Map a config name to the platform tags linked from an index page.
+
+    Root-index wheel URLs look like ``.../cu128-torch291/name-linux_x86_64.whl``.
+    """
+    found = {}
+    pattern = r'(cu\d+-torch\d+)/[^"\s<>]*-(linux_x86_64|win_amd64)\.whl'
+    for match in re.finditer(pattern, html):
+        name, tag = match.groups()
+        found.setdefault(name, set()).add(tag)
+    return found
+
+
+def host_wheel_platform(system: str, machine: str) -> Optional[str]:
+    """Return the wheel platform tag this machine can install, or None.
+
+    Published wheels are tagged linux_x86_64 or win_amd64. Other machines
+    get no matching file from pip.
+    """
+    machine_name = machine.lower()
+    if system == "Linux" and machine_name in {"x86_64", "amd64"}:
+        return "linux_x86_64"
+    if system == "Windows" and machine_name in {"amd64", "x86_64"}:
+        return "win_amd64"
+    return None
+
+
+def platform_refusal(host_platform: Optional[str], config: dict) -> Optional[str]:
+    """Return an explanation when this machine cannot install the config."""
+    available = config.get("platforms")
+    if host_platform is None:
+        return (
+            "No published wheel matches this machine.\n"
+            "Wheels are tagged linux_x86_64 or win_amd64."
+        )
+    if available and host_platform not in available:
+        tags = ", ".join(sorted(available))
+        return (
+            f"{config['name']} has no {host_platform} wheel.\n"
+            f"Published platform tags for that config: {tags}"
+        )
+    return None
+
+
+def installable_platforms(page: str) -> Optional[Set[str]]:
+    """Platform tags of wheel links on a config index page.
+
+    Returns None when the page has no wheel href pip could install. A
+    directory named like a config is not enough: cu130-torch291 publishes
+    an index that says no wheels.
+    """
+    try:
+        from validate_index import wheel_href_error
+    except ImportError:
+        wheel_href_error = None
+
+    tags = set()
+    for href in re.findall(r'href="([^"]*)"', page):
+        path = href.partition('#')[0]
+        if not path.endswith('.whl'):
+            continue
+        filename = path.rsplit('/', 1)[-1]
+        if wheel_href_error is not None:
+            if wheel_href_error(href):
+                continue
+        elif not filename.startswith('nvdiffrec_render-'):
+            continue
+        match = re.search(r'-(linux_x86_64|win_amd64)\.whl$', filename)
+        if match:
+            tags.add(match.group(1))
+    if not tags:
+        return None
+    return tags
+
+
+def wheels_dir_for_script(script_file: Optional[str]) -> Optional[Path]:
+    """Wheels directory next to the script file.
+
+    A script read from stdin has no path. Treating ``<stdin>`` as a path
+    would search a wheels directory in the working directory and hide the
+    published index.
+    """
+    if not script_file or script_file in ('<stdin>', '-'):
+        return None
+    return Path(script_file).resolve().parent / 'wheels'
 
 
 def fetch_remote_index(url: str, timeout: int = 10) -> Optional[str]:
@@ -190,11 +296,23 @@ def discover_configs(wheels_dir: Path) -> List[dict]:
         else:
             continue
         
-        configs.append({
+        config = {
             'name': config_dir.name,
             'cuda': cuda_tuple,
             'torch': torch_tuple,
-        })
+        }
+        index_path = config_dir / 'index.html'
+        if index_path.is_file():
+            try:
+                page = index_path.read_text(encoding='utf-8')
+            except (OSError, UnicodeDecodeError):
+                continue
+            # No wheel href means pip cannot install from this page.
+            tags = installable_platforms(page)
+            if tags is None:
+                continue
+            config['platforms'] = tags
+        configs.append(config)
     
     # Sort by PyTorch version (descending), then CUDA version (descending)
     configs.sort(key=lambda c: (c['torch'], c['cuda']), reverse=True)
@@ -283,8 +401,13 @@ def detect_environment() -> Tuple[Tuple[int, int], Optional[Tuple[int, int, int]
 
 
 def format_pip_command(config_name: str, base_url: str) -> str:
-    """Format the pip install command for a given config."""
-    return f"pip install nvdiffrec_render --find-links {base_url}{config_name}/"
+    """Format the pip install command for a given config.
+
+    The base URL may omit the trailing slash. Without one, the config name
+    would be glued to the host.
+    """
+    root = base_url.rstrip('/')
+    return f"pip install nvdiffrec_render --find-links {root}/{config_name}/"
 
 
 def main():
@@ -328,20 +451,21 @@ Examples:
     parser.add_argument(
         '--wheels-dir',
         type=str,
-        help='Path to wheels directory (default: ./wheels relative to script)'
+        help='Path to wheels directory (default: wheels next to this script; '
+             'the published index when the script is read from stdin)'
     )
     
     args = parser.parse_args()
     
-    # Determine wheels directory
+    # Determine wheels directory. A piped script has no file path, so a
+    # wheels directory in the working directory must not replace the index.
     if args.wheels_dir:
         wheels_dir = Path(args.wheels_dir)
     else:
-        script_dir = Path(__file__).parent
-        wheels_dir = script_dir / 'wheels'
-    
+        wheels_dir = wheels_dir_for_script(globals().get('__file__'))
+
     # Discover available configurations
-    configs = discover_configs(wheels_dir)
+    configs = discover_configs(wheels_dir) if wheels_dir is not None else []
     
     # If no configs found and --wheels-dir was not explicitly given, try remote fallback
     if not configs and not args.wheels_dir:
@@ -362,7 +486,10 @@ Examples:
         
         if not configs:
             print("Error: No wheel configurations found.", file=sys.stderr)
-            print(f"Local directory does not exist: {wheels_dir}", file=sys.stderr)
+            if wheels_dir is None:
+                print("The script has no file path, so no local wheels directory was searched.", file=sys.stderr)
+            else:
+                print(f"Local directory does not exist: {wheels_dir}", file=sys.stderr)
             if html:
                 print(f"Remote index was fetched but contained no configs", file=sys.stderr)
             else:
@@ -387,12 +514,12 @@ Examples:
     
     # Override with command-line arguments
     if args.python:
-        parts = args.python.split('.')
-        if len(parts) < 2:
-            print(f"Error: Invalid Python version format: {args.python}", file=sys.stderr)
+        try:
+            python_version = parse_python_version(args.python)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
             print("Expected format: X.Y (e.g., 3.11)", file=sys.stderr)
             sys.exit(1)
-        python_version = (int(parts[0]), int(parts[1]))
     
     if args.torch:
         try:
@@ -409,8 +536,13 @@ Examples:
             sys.exit(1)
     
     # Display detected environment
+    host_platform = host_wheel_platform(platform.system(), platform.machine())
     print("Detected environment:")
     print(f"  Python: {python_version[0]}.{python_version[1]}")
+    if host_platform:
+        print(f"  Platform: {host_platform}")
+    else:
+        print(f"  Platform: {platform.system()} {platform.machine()} (no published wheel)")
     
     if torch_version:
         torch_str = f"{torch_version[0]}.{torch_version[1]}.{torch_version[2]}"
@@ -494,6 +626,12 @@ Examples:
                 print(f"  {config['name']}: CUDA {cuda_str}, PyTorch {torch_str}{py_range}")
             sys.exit(1)
         
+        refusal = platform_refusal(host_platform, exact_match)
+        if refusal:
+            print(refusal)
+            print()
+            sys.exit(1)
+
         print("✅ Found exact match!")
         print()
         print("Install command:")

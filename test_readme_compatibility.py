@@ -262,6 +262,21 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         self.assertIn("only when both match a published config", finder)
         self.assertNotIn("backward-compatible", self.readme)
 
+    def test_readme_explains_missing_ops_on_published_wheels(self):
+        section = self.readme.split("### ImportError: cannot import name 'ops'", 1)
+        self.assertEqual(len(section), 2)
+        body = section[1].split("### ", 1)[0]
+        self.assertIn("cu124-torch251", body)
+        self.assertIn("cu128-torch291", body)
+        self.assertIn("linux_x86_64", body)
+        self.assertIn("win_amd64", body)
+        self.assertIn("xfm_fwd", body)
+        self.assertIn("lambert_fwd", body)
+        self.assertIn("torch_bindings.cpp", body)
+        self.assertIn("renderutils/ops.py", body)
+        self.assertIn("next build of a configuration", body)
+        self.assertIn("not in the files pip installs today", body)
+
     def test_readme_states_published_compute_capabilities(self):
         self.assertNotIn("RTX 20/30/40/50 series, A100, B100/B200", self.readme)
         section = self.readme.split("## GPU architectures", 1)

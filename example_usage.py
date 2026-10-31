@@ -58,27 +58,34 @@ def check_extensions():
     try:
         from nvdiffrec_render.renderutils import _C
         print("✓ Extension module _C imported successfully")
-        
-        # Check that key functions are available
+        if not hasattr(_C, "xfm_fwd"):
+            print("  ✗ _C.xfm_fwd not found")
+            return False
+        print("  ✓ _C.xfm_fwd")
+    except ImportError as e:
+        print(f"✗ Failed to import extension: {e}")
+        return False
+
+    try:
+        from nvdiffrec_render.renderutils import ops
+        print("✓ nvdiffrec_render.renderutils.ops")
+        # Callers use these names. The compiled module exports xfm_fwd, not xfm_points.
         expected_functions = [
             'xfm_points',
-            'xfm_vectors', 
+            'xfm_vectors',
             'image_loss',
             'lambert',
             'pbr_bsdf',
         ]
-        
         for func_name in expected_functions:
-            if hasattr(_C, func_name):
+            if hasattr(ops, func_name):
                 print(f"  ✓ {func_name}")
             else:
                 print(f"  ✗ {func_name} not found")
                 return False
-        
         return True
-        
     except ImportError as e:
-        print(f"✗ Failed to import extension: {e}")
+        print(f"✗ Failed to import ops: {e}")
         return False
 
 
@@ -99,10 +106,10 @@ def run_basic_test():
         # Create dummy 3D points
         points = torch.randn(1, 10, 3, dtype=torch.float32, device=device)
         
-        # Test point transformation
+        # Test point transformation. xfm_fwd returns homogeneous points.
         transformed = ops.xfm_points(points, mtx)
         
-        if transformed.shape == points.shape:
+        if transformed.shape[-1] == 4 and transformed.shape[:-1] == points.shape[:-1]:
             print("✓ Basic point transformation works")
             print(f"  Input shape: {points.shape}")
             print(f"  Output shape: {transformed.shape}")

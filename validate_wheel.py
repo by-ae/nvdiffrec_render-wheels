@@ -40,6 +40,81 @@ def metadata_text(raw):
     return raw.replace('\r\n', '\n').replace('\r', '\n')
 
 
+# Names renderutils/__init__.py imports, and the torch_bindings.cpp entry
+# points those wrappers have to call. Alias assignments such as
+# `_C.xfm_points` do not exist on the compiled module.
+OPS_DEF_PREFIXES = (
+    "def xfm_points(",
+    "def xfm_vectors(",
+    "def image_loss(",
+    "def diffuse_cubemap(",
+    "def specular_cubemap(",
+    "def prepare_shading_normal(",
+    "def lambert(",
+    "def frostbite_diffuse(",
+    "def pbr_specular(",
+    "def pbr_bsdf(",
+    "def _fresnel_shlick(",
+    "def _ndf_ggx(",
+    "def _lambda_ggx(",
+    "def _masking_smith(",
+)
+OPS_ENTRY_POINTS = (
+    "xfm_fwd(",
+    "xfm_bwd(",
+    "lambert_fwd(",
+    "lambert_bwd(",
+    "image_loss_fwd(",
+    "image_loss_bwd(",
+    "prepare_shading_normal_fwd(",
+    "pbr_bsdf_fwd(",
+    "pbr_bsdf_bwd(",
+    "diffuse_cubemap_fwd(",
+    "specular_cubemap_fwd(",
+    "specular_bounds(",
+)
+OPS_ALIASES = (
+    "_C.xfm_points",
+    "_C.xfm_vectors",
+    "_C.image_loss",
+    "_C.lambert",
+    "_C.pbr_bsdf",
+    "_C.prepare_shading_normal",
+)
+
+
+def is_compiled_extension(path):
+    """True for renderutils/_C.<tag>.so and renderutils/_C.<tag>.pyd."""
+    name = path.rsplit("/", 1)[-1]
+    parent = path[: -(len(name) + 1)] if "/" in path else ""
+    if not parent.endswith("renderutils"):
+        return False
+    if not name.startswith("_C."):
+        return False
+    return name.endswith(".so") or name.endswith(".pyd")
+
+
+def ops_source_error(source):
+    """Return an error if ops.py is not the wrapper for the compiled entry points."""
+    problems = []
+    missing = [snippet for snippet in OPS_DEF_PREFIXES + OPS_ENTRY_POINTS if snippet not in source]
+    if missing:
+        problems.append("ops.py is missing " + ", ".join(missing))
+    aliases = [alias for alias in OPS_ALIASES if alias in source]
+    if aliases:
+        problems.append(
+            "ops.py aliases compiled names that torch_bindings.cpp does not export: "
+            + ", ".join(aliases)
+        )
+    return "; ".join(problems)
+
+
+def renderutils_init_error(source):
+    if "xfm_points" not in source or "ops" not in source:
+        return "renderutils/__init__.py does not import the ops API (xfm_points)"
+    return ""
+
+
 def validate_wheel(wheel_path):
     """Validate a wheel file's structure and metadata."""
     errors = []
@@ -54,13 +129,40 @@ def validate_wheel(wheel_path):
         with zipfile.ZipFile(wheel_path, 'r') as zf:
             files = zf.namelist()
             
-            # Check for essential components
-            has_c_extension = any('.so' in f or '.pyd' in f for f in files)
+            # Check for essential components. A stray .so anywhere in the
+            # archive is not the extension users import.
+            has_c_extension = any(is_compiled_extension(f) for f in files)
             has_metadata = any('METADATA' in f for f in files)
             has_wheel_metadata = any('WHEEL' in f for f in files)
             
             if not has_c_extension:
-                errors.append("Missing compiled extension (.so/.pyd) - the wheel must include compiled CUDA code")
+                errors.append(
+                    "Missing compiled extension renderutils/_C (.so or .pyd) - "
+                    "the wheel must include compiled CUDA code"
+                )
+
+            if "nvdiffrec_render/__init__.py" not in files:
+                errors.append(
+                    "Missing nvdiffrec_render/__init__.py - without it the wheel "
+                    "is only the _C file and renderutils.ops cannot be imported"
+                )
+            init_name = "nvdiffrec_render/renderutils/__init__.py"
+            ops_name = "nvdiffrec_render/renderutils/ops.py"
+            if init_name not in files:
+                errors.append(f"Missing {init_name}")
+            else:
+                init_error = renderutils_init_error(zf.read(init_name).decode("utf-8"))
+                if init_error:
+                    errors.append(init_error)
+            if ops_name not in files:
+                errors.append(
+                    f"Missing {ops_name} - the compiled module exports xfm_fwd, "
+                    "not the xfm_points name callers import"
+                )
+            else:
+                ops_error = ops_source_error(zf.read(ops_name).decode("utf-8"))
+                if ops_error:
+                    errors.append(ops_error)
             
             if not has_metadata:
                 errors.append("Missing METADATA file - wheel package metadata is incomplete")
