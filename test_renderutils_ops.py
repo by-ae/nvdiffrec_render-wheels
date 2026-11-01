@@ -209,6 +209,18 @@ class RenderutilsOpsTest(unittest.TestCase):
         self.ops.pbr_bsdf(*((self.tensor,) * 6), bsdf="phong")
         self.assertEqual(self.plugin.calls[-1][1][-2], 0)
 
+    def test_unknown_loss_or_tonemapper_is_rejected_before_the_kernel(self):
+        """The compiled kernel turns any other loss name into l1 and skips the tonemapper."""
+        image = FakeTensor("img", shape=(2, 4, 5, 3))
+        with self.assertRaises(ValueError) as raised:
+            self.ops.image_loss(image, image, loss="l2")
+        self.assertIn("l1", str(raised.exception))
+        self.assertIn("l2", str(raised.exception))
+        with self.assertRaises(ValueError) as raised:
+            self.ops.image_loss(image, image, loss="mse", tonemapper="srgb")
+        self.assertIn("log_srgb", str(raised.exception))
+        self.assertEqual(self.plugin.calls, [])
+
     def test_image_loss_reduces_by_batch_height_and_width(self):
         image = FakeTensor("img", shape=(2, 4, 5, 3))
         result = self.ops.image_loss(image, image, loss="mse", tonemapper="log_srgb")
