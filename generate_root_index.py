@@ -81,13 +81,17 @@ class _AnchorParser(HTMLParser):
             self.hrefs.append(href)
 
 
-def valid_wheel_links(html: str):
-    """Return (filename, href) for anchors that pass the wheel-name check."""
+def valid_wheel_links(html: str, config_name: str = ""):
+    """Return (filename, href) for anchors that belong on this config page.
+
+    A filename pip would accept is still dropped when its local version is
+    another configuration's. The root page would otherwise offer that file.
+    """
     parser = _AnchorParser()
     parser.feed(html)
     links = []
     for href in parser.hrefs:
-        if validate_index.wheel_href_error(href):
+        if validate_index.wheel_link_error(href, config_name):
             continue
         path, _fragment = validate_index.split_wheel_href(href)
         links.append((path.rsplit('/', 1)[-1], href))
@@ -106,7 +110,10 @@ def collect_configs(wheels_dir: Path):
         if versions is None:
             raise SystemExit(f"Unrecognized configuration directory: {subdir.name}")
         cuda, torch = versions
-        links = valid_wheel_links((subdir / 'index.html').read_text(encoding='utf-8'))
+        links = valid_wheel_links(
+            (subdir / 'index.html').read_text(encoding='utf-8'),
+            subdir.name,
+        )
         entry = {
             'name': subdir.name,
             'cuda': cuda,

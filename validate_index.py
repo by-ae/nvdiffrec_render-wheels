@@ -72,6 +72,85 @@ def wheel_href_error(href: str) -> str:
     return '' if _ok else message
 
 
+def expected_local_tag(config_name: str):
+    """Return ``cu128torch29`` for ``cu128-torch291``, or None.
+
+    The directory keeps the PyTorch patch (torch291 is 2.9.1). The wheel's
+    local version keeps major and minor only (torch29), which is the
+    NVDIFFREC_LOCAL_VERSION the build writes.
+    """
+    match = re.fullmatch(r'cu(\d+)-torch(\d+)', config_name)
+    if not match:
+        return None
+    cuda_short, torch_short = match.groups()
+    if not cuda_short.isdigit():
+        return None
+    if len(torch_short) == 3 and torch_short.isdigit():
+        major, minor = int(torch_short[0]), int(torch_short[1])
+    elif len(torch_short) == 4 and torch_short.isdigit():
+        major, minor = int(torch_short[0]), int(torch_short[1:3])
+    else:
+        return None
+    return f"cu{int(cuda_short)}torch{major}{minor}"
+
+
+def filename_local_tag(filename: str):
+    """Return the local version in a wheel filename, or None."""
+    if not filename.endswith('.whl'):
+        return None
+    parts = filename[:-4].split('-')
+    if len(parts) < 2 or '+' not in parts[1]:
+        return None
+    local = parts[1].split('+', 1)[1]
+    return local or None
+
+
+def config_name_from_href(href: str):
+    """Return the ``cu128-torch291`` directory in a wheel URL, or None."""
+    path, _fragment = split_wheel_href(href)
+    match = re.search(r'(cu\d+-torch\d+)/[^/]+\.whl$', path)
+    return match.group(1) if match else None
+
+
+def local_tag_error(filename: str, config_name: str) -> str:
+    """Return an error when the wheel's local version is not this config's.
+
+    Pip installs whatever file the page links. A cu126 wheel on the cu128
+    page loads in the wrong PyTorch build and fails at import.
+    """
+    expected = expected_local_tag(config_name)
+    if expected is None:
+        return ''
+    actual = filename_local_tag(filename)
+    if actual is None:
+        return f"Wheel filename has no local version for {config_name}: {filename}"
+    if actual != expected:
+        return f"{filename} is tagged {actual}, but {config_name} publishes {expected}"
+    return ''
+
+
+def wheel_link_error(href: str, config_name: str = '') -> str:
+    """Return an error for a wheel href on a config page or the root index.
+
+    ``config_name`` is the directory that owns the page. A name that is not
+    a configuration is ignored, so a scratch index can still be checked for
+    filename shape alone.
+    """
+    message = wheel_href_error(href)
+    if message:
+        return message
+    path, _fragment = split_wheel_href(href)
+    filename = path.rsplit('/', 1)[-1]
+    href_config = config_name_from_href(href)
+    page_config = config_name if expected_local_tag(config_name) else ''
+    if href_config and page_config and href_config != page_config:
+        return f"Link is under {href_config}, but this page is {page_config}: {href}"
+    expected = href_config or page_config
+    if not expected:
+        return ''
+    return local_tag_error(filename, expected)
+
+
 def validate_wheel_filename(filename: str) -> Tuple[bool, str]:
     """
     Validate that a filename follows wheel naming conventions.
@@ -136,9 +215,11 @@ def validate_subindex(path: Path) -> Tuple[List[str], List[str]]:
         
         print(f"  Found {len(parser.links)} wheel link(s)")
         
-        # Validate each wheel filename and optional PEP 503 hash fragment
+        # Validate each wheel filename, optional hash, and the config tag.
+        # The parent directory is the configuration when this is a real page.
+        page_config = path.parent.name
         for link in parser.links:
-            error_msg = wheel_href_error(link)
+            error_msg = wheel_link_error(link, page_config)
             if error_msg:
                 errors.append(f"Invalid wheel link in {path}: {error_msg}")
         
@@ -197,7 +278,9 @@ def validate_top_index(path: Path, wheels_dir: Path) -> Tuple[List[str], List[st
         print(f"  Linked subdirs: {sorted(linked_subdirs)}")
 
         for link in parser.links:
-            error_msg = wheel_href_error(link)
+            error_msg = wheel_link_error(link)
+            if not error_msg and config_name_from_href(link) is None:
+                error_msg = f"Wheel link is not under a configuration directory: {link}"
             if error_msg:
                 errors.append(f"Invalid wheel link in {path}: {error_msg}")
         

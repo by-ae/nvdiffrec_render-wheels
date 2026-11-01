@@ -167,6 +167,27 @@ printf '%s\\t%s\\n' \\
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(index.read_text(encoding="utf-8"), "PREVIOUS")
 
+    def test_asset_from_another_config_is_left_out(self):
+        other = "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-linux_x86_64.whl"
+        write_fake_gh(
+            self.bin_dir,
+            """#!/bin/sh
+printf '%s\\t%s\\n' \\
+    '{linux}' 'sha256:{linux_hash}' \\
+    '{other}' 'sha256:{linux_hash}'
+""".format(linux=VALID_LINUX, linux_hash=LINUX_HASH, other=other),
+        )
+        result = self.run_script(
+            ["12.6", "2.6.0", "126", "260"],
+            self.env(GH_TOKEN="test-token", GITHUB_REPOSITORY="example/wheels"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(other, result.stderr)
+        html = (self.work / "wheels" / "cu126-torch260" / "index.html").read_text(encoding="utf-8")
+        self.assertIn(VALID_LINUX, html)
+        self.assertNotIn(other, html)
+        self.assertNotIn("cu128torch29", html)
+
     def test_empty_asset_list_says_nothing_is_published(self):
         write_fake_gh(
             self.bin_dir,

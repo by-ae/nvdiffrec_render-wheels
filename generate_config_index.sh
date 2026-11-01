@@ -92,20 +92,23 @@ if [ "$have_gh" -eq 1 ]; then
     gh release view "$RELEASE_TAG" --repo "$REPO" --json assets \
         --jq '.assets[] | [.name, (.digest // "")] | @tsv' > "$raw_file"
 
-    python3 - "$SCRIPT_DIR" "$raw_file" "$filtered_file" <<'PY'
+    python3 - "$SCRIPT_DIR" "$raw_file" "$filtered_file" "$RELEASE_TAG" <<'PY'
 import sys
 from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
-from validate_index import validate_wheel_filename
+from validate_index import local_tag_error, validate_wheel_filename
 
-raw_path, out_path = sys.argv[2], sys.argv[3]
+raw_path, out_path, release_tag = sys.argv[2], sys.argv[3], sys.argv[4]
 kept = []
 for line in Path(raw_path).read_text(encoding="utf-8").splitlines():
     if not line.strip():
         continue
     name, _, digest = line.partition("\t")
     ok, message = validate_wheel_filename(name)
+    if ok:
+        message = local_tag_error(name, release_tag)
+        ok = not message
     if not ok:
         print(f"Skipping {name}: {message}", file=sys.stderr)
         continue
