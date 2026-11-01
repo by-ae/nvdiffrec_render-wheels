@@ -3,10 +3,13 @@
 Unit tests for validate_index.py.
 Tests the index HTML validation logic without requiring actual wheel files.
 """
+import io
 import unittest
 import tempfile
 import shutil
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 import sys
 import os
 
@@ -221,6 +224,20 @@ class TestTopIndexValidation(unittest.TestCase):
         
         # External link should not cause errors
         self.assertEqual(len(errors), 0)
+
+
+class TestConsoleEncoding(unittest.TestCase):
+    def test_summary_is_printable_on_cp1252(self):
+        raw = io.BytesIO()
+        stdout = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+        wheels = str(Path(__file__).resolve().parent / "wheels")
+        with patch.object(sys, "argv", ["validate_index.py", wheels]), redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as raised:
+                validate_index.main()
+        self.assertEqual(raised.exception.code, 0)
+        stdout.flush()
+        text = raw.getvalue().decode("cp1252")
+        self.assertIn("valid", text.lower())
 
 
 if __name__ == '__main__':

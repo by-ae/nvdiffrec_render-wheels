@@ -81,6 +81,28 @@ class BuildHtmlTest(unittest.TestCase):
         self.assertNotIn(DOUBLED, html)
         self.assertIn("<code>0.0.1+cu130torch215</code>", html)
 
+    def test_linux_only_newer_release_does_not_hide_the_windows_file(self):
+        """Pip filters on the platform tag before it compares versions."""
+        linux_130 = "nvdiffrec_render-0.0.1+cu130torch29-cp310-cp310-linux_x86_64.whl"
+        linux_128 = "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-linux_x86_64.whl"
+        windows_128 = "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-win_amd64.whl"
+        self.write_config("cu130-torch291", config_page((linux_130, linux_130)))
+        self.write_config(
+            "cu128-torch291",
+            config_page((linux_128, linux_128), (windows_128, windows_128)),
+        )
+        html = generate_root_index.build_html(self.wheels)
+        self.assertIn(
+            "On <code>linux_x86_64</code> the newest matching file is "
+            "<code>0.0.1+cu130torch29</code>",
+            html,
+        )
+        self.assertIn(
+            "On <code>win_amd64</code> the newest matching file is "
+            "<code>0.0.1+cu128torch29</code>",
+            html,
+        )
+
     def test_checked_in_index_is_unchanged_by_the_wider_parser(self):
         generated = generate_root_index.build_html(ROOT / "wheels")
         checked_in = (ROOT / "wheels" / "index.html").read_text(encoding="utf-8")

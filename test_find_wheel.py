@@ -448,7 +448,6 @@ class TestParseConfigsFromIndexHTML(unittest.TestCase):
         
         configs = find_wheel.parse_configs_from_index_html(html)
         
-        # Published configurations only. cu130-torch291 has no wheels.
         self.assertEqual(
             {config['name'] for config in configs},
             {
@@ -457,6 +456,7 @@ class TestParseConfigsFromIndexHTML(unittest.TestCase):
                 'cu126-torch280',
                 'cu128-torch280',
                 'cu128-torch291',
+                'cu130-torch291',
             },
         )
         
@@ -480,6 +480,11 @@ class TestParseConfigsFromIndexHTML(unittest.TestCase):
             self.assertIn('python_range', cu128)
             self.assertEqual(cu128['python_range'], ((3, 10), (3, 13)))
             self.assertEqual(cu128['platforms'], {'linux_x86_64', 'win_amd64'})
+
+        cu130 = next((c for c in configs if c['name'] == 'cu130-torch291'), None)
+        self.assertIsNotNone(cu130)
+        self.assertEqual(cu130['python_range'], ((3, 10), (3, 13)))
+        self.assertEqual(cu130['platforms'], {'linux_x86_64'})
     
     def test_parse_mock_index_html(self):
         """Test parsing with mock HTML."""
@@ -636,13 +641,28 @@ class TestInstallCommand(unittest.TestCase):
         )
         self.assertEqual(result.stdout.count("pip install"), 1)
 
-    def test_cuda_13_does_not_offer_the_cu128_wheel(self):
+    def test_cuda_13_offers_the_published_linux_wheel(self):
         result = self.run_finder("--torch", "2.9.1", "--cuda", "13.0", "--python", "3.11")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("pip install", result.stdout)
-        self.assertNotIn("--find-links", result.stdout)
-        self.assertIn("cu128-torch291", result.stdout)
-        self.assertIn("will not import", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "pip install nvdiffrec_render --find-links "
+            "https://by-ae.github.io/nvdiffrec_render-wheels/cu130-torch291/",
+            result.stdout,
+        )
+        self.assertNotIn("cu128-torch291/", result.stdout)
+        self.assertEqual(result.stdout.count("pip install"), 1)
+
+    def test_windows_cuda_13_has_no_wheel(self):
+        code, stdout, stderr = self._run_main(
+            ["--torch", "2.9.1", "--cuda", "13.0", "--python", "3.11"],
+            "Windows",
+            "AMD64",
+        )
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("pip install", stdout, stderr)
+        self.assertIn("cu130-torch291", stdout)
+        self.assertIn("win_amd64", stdout)
+        self.assertIn("linux_x86_64", stdout)
 
     def test_different_torch_patch_does_not_offer_an_install_command(self):
         result = self.run_finder("--torch", "2.9.0", "--cuda", "12.8", "--python", "3.11")
@@ -660,6 +680,20 @@ class TestInstallCommand(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 find_wheel.main()
         return raised.exception.code, stdout.getvalue(), stderr.getvalue()
+
+    def test_exact_match_survives_a_cp1252_console(self):
+        raw = io.BytesIO()
+        stdout = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+        stderr = io.StringIO()
+        argv = ["find_wheel.py", "--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11"]
+        with patch.object(sys, "argv", argv), redirect_stdout(stdout), redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                find_wheel.main()
+        self.assertEqual(raised.exception.code, 0, stderr.getvalue())
+        stdout.flush()
+        text = raw.getvalue().decode("cp1252")
+        self.assertIn("cu128-torch291/", text)
+        self.assertIn("pip install", text)
 
     def test_windows_exact_match_still_prints_the_install_command(self):
         code, stdout, stderr = self._run_main(

@@ -113,14 +113,18 @@ class ReadmeCompatibilityTest(unittest.TestCase):
     def test_quick_install_describes_the_wheel_pip_selects(self):
         published, _unpublished = generate_root_index.collect_configs(WHEELS)
         version, entry = generate_root_index.preferred_release(published)
-        # packaging.version ranks 0.0.1+cu128torch29 above the other published
-        # local labels. pip installs that file from the combined index.
-        self.assertEqual(version, "0.0.1+cu128torch29")
-        self.assertEqual(entry["name"], "cu128-torch291")
+        # packaging.version ranks 0.0.1+cu130torch29 above the other published
+        # local labels. pip installs that file on Linux. Windows skips it
+        # because the file is linux_x86_64 only, and gets cu128 instead.
+        self.assertEqual(version, "0.0.1+cu130torch29")
+        self.assertEqual(entry["name"], "cu130-torch291")
         quick = self.readme.split("### Quick Install", 1)[1].split("### ", 1)[0]
         self.assertNotIn("auto-detect", quick.lower())
         self.assertIn(version, quick)
         self.assertIn(entry["name"], quick)
+        self.assertIn("linux_x86_64", quick)
+        self.assertIn("0.0.1+cu128torch29", quick)
+        self.assertIn("win_amd64", quick)
         html = generate_root_index.build_html(WHEELS)
         self.assertIn(f"<code>{version}</code>", html)
         self.assertNotIn("auto-detect", html.lower())
@@ -212,7 +216,11 @@ class ReadmeCompatibilityTest(unittest.TestCase):
             self.assertNotIn("git pull --rebase origin main || true", text)
             self.assertNotIn("git rebase --abort", text, path.name)
             self.assertIn("\n        run: ./publish_index_update.sh\n", text, path.name)
+            self.assertIn("gh workflow run deploy-pages.yml", text, path.name)
+            self.assertIn("gh workflow run validate-config.yml", text, path.name)
             self.assertNotIn("- '.github/workflows/build-cu*-torch*.yml'", text)
+        validate = (WORKFLOWS / "validate-config.yml").read_text(encoding="utf-8")
+        self.assertIn("\n  workflow_dispatch:\n", validate)
 
     def test_arch_lists_include_sm80_and_match_the_toolkit(self):
         """8.0 was removed from every Linux list while fixing Windows.
@@ -267,15 +275,18 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         self.assertEqual(len(section), 2)
         body = section[1].split("### ", 1)[0]
         self.assertIn("cu124-torch251", body)
+        self.assertIn("cu126-torch260", body)
+        self.assertIn("cu126-torch280", body)
+        self.assertIn("cu128-torch280", body)
         self.assertIn("cu128-torch291", body)
-        self.assertIn("linux_x86_64", body)
-        self.assertIn("win_amd64", body)
+        self.assertIn("cu130-torch291", body)
+        self.assertIn("include `renderutils/ops.py`", body)
+        self.assertIn("no `ops.py`", body)
         self.assertIn("xfm_fwd", body)
         self.assertIn("lambert_fwd", body)
         self.assertIn("torch_bindings.cpp", body)
-        self.assertIn("renderutils/ops.py", body)
-        self.assertIn("next build of a configuration", body)
-        self.assertIn("not in the files pip installs today", body)
+        self.assertIn("next build", body)
+        self.assertIn("not in the files pip installs for them today", body)
 
     def test_readme_states_published_compute_capabilities(self):
         self.assertNotIn("RTX 20/30/40/50 series, A100, B100/B200", self.readme)
@@ -284,27 +295,27 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         body = section[1].split("## ", 1)[0]
         self.assertIn("| 12.4 and 12.6 | 7.5, 8.6, 8.9, 9.0 |", body)
         self.assertIn("| 12.8 | 7.5, 8.6, 8.9, 9.0, 10.0, 12.0 |", body)
-        self.assertIn("8.0 (A100) is not in any published file", body)
+        self.assertIn("| 13.0 | 7.5, 8.0, 8.6, 8.9, 9.0, 10.0, 12.0 |", body)
+        self.assertIn("8.0 (A100) is in the CUDA 13.0 wheels only", body)
+        self.assertIn("not in the CUDA 12.4, 12.6, or 12.8 files", body)
         self.assertIn("do not request 10.0 or 12.0", body)
 
-    def test_cu130_is_described_as_unpublished(self):
+    def test_cu130_publish_is_linux_only(self):
         workflow = self.by_name["cu130-torch291"]
         self.assertEqual(workflow["linux"], ["3.10", "3.11", "3.12", "3.13"])
         self.assertEqual(workflow["windows"], [])
         self.assertIn("https://download.pytorch.org/whl/cu130", workflow["index_urls"])
         linux, windows = wheels_by_platform("cu130-torch291")
-        self.assertEqual(linux, set())
+        self.assertEqual(linux, {"3.10", "3.11", "3.12", "3.13"})
         self.assertEqual(windows, set())
-        unpublished = self.readme.split("## Not published yet", 1)[1].split("## ", 1)[0]
-        self.assertIn("cu130-torch291", unpublished)
-        self.assertIn("build-cu130-torch291.yml", unpublished)
-        self.assertIn("https://download.pytorch.org/whl/cu130", unpublished)
-        self.assertNotIn("--find-links", unpublished)
-        # The page URL may be mentioned, but not as an install command.
-        self.assertNotIn(
+        self.assertIn("build-cu130-torch291.yml", self.readme)
+        self.assertIn("https://download.pytorch.org/whl/cu130", self.readme)
+        self.assertIn(
             "--find-links https://by-ae.github.io/nvdiffrec_render-wheels/cu130-torch291/",
             self.readme,
         )
+        self.assertIn("Linux only", self.readme)
+        self.assertIn("no Windows wheel", self.readme)
 
     def test_generator_skips_invalid_wheel_links_and_rejects_gaps(self):
         html = """

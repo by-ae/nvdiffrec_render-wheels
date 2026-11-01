@@ -17,6 +17,19 @@ from urllib.request import urlopen
 from urllib.error import URLError
 
 
+def _print(line=""):
+    """Print a status line when the console cannot encode every character.
+
+    A cp1252 console raises UnicodeEncodeError on the status mark and
+    the install command after it is never shown.
+    """
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(encoding, errors="replace").decode(encoding))
+
+
 def parse_version(version_str: str) -> Tuple[int, int, int]:
     """
     Parse a version string like '2.9.1' or '2.9.1+cu128' into (major, minor, patch).
@@ -560,7 +573,7 @@ Examples:
     
     # Handle CPU-only torch
     if torch_version and not cuda_version and not args.cuda:
-        print("❌ Your PyTorch installation is CPU-only (no CUDA support).")
+        _print("❌ Your PyTorch installation is CPU-only (no CUDA support).")
         print()
         print("nvdiffrec_render requires a CUDA-enabled PyTorch installation.")
         print()
@@ -603,7 +616,7 @@ Examples:
     if exact_match:
         # Check if Python version is supported
         if not check_python_version_supported(python_version, exact_match):
-            print("❌ Found matching CUDA and PyTorch, but Python version not supported.")
+            _print("❌ Found matching CUDA and PyTorch, but Python version not supported.")
             print()
             cuda_str = format_cuda_version(exact_match['cuda'])
             torch_str = f"{exact_match['torch'][0]}.{exact_match['torch'][1]}.{exact_match['torch'][2]}"
@@ -632,7 +645,7 @@ Examples:
             print()
             sys.exit(1)
 
-        print("✅ Found exact match!")
+        _print("✅ Found exact match!")
         print()
         print("Install command:")
         print(f"  {format_pip_command(exact_match['name'], args.base_url)}")
@@ -641,7 +654,7 @@ Examples:
     
     # No exact match. torch.version.cuda is the CUDA build PyTorch was
     # compiled with, not a driver version that can load an older wheel.
-    print("❌ No exact match found for your configuration.")
+    _print("❌ No exact match found for your configuration.")
     print()
     print("The extension loads only in the PyTorch build it was compiled against.")
     print("There is no install command for a different PyTorch or CUDA version.")

@@ -35,6 +35,18 @@ class IndexHTMLParser(HTMLParser):
                     self.subdirs.append(path.rstrip('/'))
 
 
+def _print(line=""):
+    """Print a status line when the console cannot encode every character.
+
+    A cp1252 console raises UnicodeEncodeError on the summary marks.
+    """
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(encoding, errors="replace").decode(encoding))
+
+
 def split_wheel_href(href: str) -> Tuple[str, str]:
     """Split a link into path and optional URL fragment.
 
@@ -237,17 +249,17 @@ def main():
     print("=" * 60)
     
     if all_errors:
-        print(f"❌ {len(all_errors)} error(s):")
+        _print(f"❌ {len(all_errors)} error(s):")
         for err in all_errors:
-            print(f"  - {err}")
+            _print(f"  - {err}")
     
     if all_warnings:
-        print(f"⚠️  {len(all_warnings)} warning(s):")
+        _print(f"⚠️  {len(all_warnings)} warning(s):")
         for warn in all_warnings:
-            print(f"  - {warn}")
+            _print(f"  - {warn}")
     
     if not all_errors and not all_warnings:
-        print("✅ All index files are valid")
+        _print("✅ All index files are valid")
     
     print()
     
