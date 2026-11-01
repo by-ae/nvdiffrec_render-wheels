@@ -219,6 +219,17 @@ class TestConfigDiscovery(unittest.TestCase):
         self.assertEqual(len(configs), 1)
         self.assertEqual(configs[0]['platforms'], {'win_amd64'})
 
+    def test_directory_scan_skips_a_wheel_from_another_config(self):
+        """A cu126 file sitting in the cu128 directory is not installable there."""
+        wheels_dir = Path(self.test_dir)
+        config_dir = wheels_dir / 'cu128-torch291'
+        config_dir.mkdir()
+        (config_dir / 'index.html').write_text(
+            '<a href="nvdiffrec_render-0.0.1+cu126torch26-cp310-cp310-win_amd64.whl">w</a>',
+            encoding='utf-8',
+        )
+        self.assertEqual(find_wheel.discover_configs(wheels_dir), [])
+
 
 class TestConfigMatching(unittest.TestCase):
     """Test configuration matching logic."""
@@ -727,6 +738,34 @@ class TestInstallCommand(unittest.TestCase):
         message = find_wheel.platform_refusal("linux_x86_64", configs[0])
         self.assertIn("no linux_x86_64 wheel", message)
         self.assertIsNone(find_wheel.platform_refusal("win_amd64", configs[0]))
+
+    def test_broken_wheel_links_are_not_a_published_platform(self):
+        """A doubled tag or another config's file must not count as installable."""
+        doubled = (
+            "nvdiffrec_render-0.0.1+cu128torch29-cp310+cu128torch29-cp310-win_amd64.whl"
+        )
+        other = "nvdiffrec_render-0.0.1+cu126torch26-cp310-cp310-win_amd64.whl"
+        good = "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-linux_x86_64.whl"
+        html = f"""
+        <tr><td>12.8</td><td>2.9.1</td><td>3.10-3.13</td><td><a href="cu128-torch291/">cu128-torch291</a></td></tr>
+        <a href="https://example.com/cu128-torch291/{good}">ok</a>
+        <a href="https://example.com/cu128-torch291/{doubled}">doubled</a>
+        <a href="https://example.com/cu128-torch291/{other}">other</a>
+        """
+        configs = find_wheel.parse_configs_from_index_html(html)
+        self.assertEqual(configs[0]["platforms"], {"linux_x86_64"})
+        with tempfile.TemporaryDirectory() as tmp:
+            index = Path(tmp) / "index.html"
+            index.write_text(html, encoding="utf-8")
+            code, stdout, stderr = self._run_main(
+                ["--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11",
+                 "--wheels-dir", tmp],
+                "Windows",
+                "AMD64",
+            )
+        self.assertNotEqual(code, 0, stderr)
+        self.assertNotIn("pip install", stdout)
+        self.assertIn("no win_amd64 wheel", stdout)
 
     def test_non_numeric_python_exits_without_a_traceback(self):
         result = self.run_finder("--torch", "2.9.1", "--cuda", "12.8", "--python", "abc")

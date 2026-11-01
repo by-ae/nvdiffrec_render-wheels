@@ -155,16 +155,48 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
     return configs
 
 
+def _wheel_link_helpers():
+    """Validators shared with the index. Missing module keeps the old name check."""
+    try:
+        from validate_index import (
+            config_name_from_href,
+            local_tag_error,
+            wheel_href_error,
+        )
+    except ImportError:
+        return None
+    return wheel_href_error, config_name_from_href, local_tag_error
+
+
 def platforms_by_config(html: str) -> dict:
     """Map a config name to the platform tags linked from an index page.
 
     Root-index wheel URLs look like ``.../cu128-torch291/name-linux_x86_64.whl``.
+    A doubled-tag name or a file whose local version belongs to another
+    config is not a platform pip can install, so it does not count.
     """
+    helpers = _wheel_link_helpers()
     found = {}
-    pattern = r'(cu\d+-torch\d+)/[^"\s<>]*-(linux_x86_64|win_amd64)\.whl'
-    for match in re.finditer(pattern, html):
-        name, tag = match.groups()
-        found.setdefault(name, set()).add(tag)
+    for href in re.findall(r'href="([^"]*)"', html):
+        path = href.partition('#')[0]
+        filename = path.rsplit('/', 1)[-1]
+        if helpers is None:
+            if not filename.startswith('nvdiffrec_render-'):
+                continue
+            config_match = re.search(r'(cu\d+-torch\d+)/', path)
+            config = config_match.group(1) if config_match else None
+        else:
+            wheel_href_error, config_name_from_href, local_tag_error = helpers
+            if wheel_href_error(href):
+                continue
+            config = config_name_from_href(href)
+            if config and local_tag_error(filename, config):
+                continue
+        if not config:
+            continue
+        tag_match = re.search(r'-(linux_x86_64|win_amd64)\.whl$', filename)
+        if tag_match:
+            found.setdefault(config, set()).add(tag_match.group(1))
     return found
 
 
@@ -199,29 +231,34 @@ def platform_refusal(host_platform: Optional[str], config: dict) -> Optional[str
     return None
 
 
-def installable_platforms(page: str) -> Optional[Set[str]]:
+def installable_platforms(page: str, config_name: str = "") -> Optional[Set[str]]:
     """Platform tags of wheel links on a config index page.
 
     Returns None when the page has no wheel href pip could install. A
     directory named like a config is not enough: cu130-torch291 publishes
-    an index that says no wheels.
+    an index that says no wheels. A file whose local version belongs to
+    another config is not installable from this directory either.
     """
-    try:
-        from validate_index import wheel_href_error
-    except ImportError:
-        wheel_href_error = None
-
+    helpers = _wheel_link_helpers()
     tags = set()
     for href in re.findall(r'href="([^"]*)"', page):
         path = href.partition('#')[0]
         if not path.endswith('.whl'):
             continue
         filename = path.rsplit('/', 1)[-1]
-        if wheel_href_error is not None:
+        if helpers is None:
+            if not filename.startswith('nvdiffrec_render-'):
+                continue
+        else:
+            wheel_href_error, config_name_from_href, local_tag_error = helpers
             if wheel_href_error(href):
                 continue
-        elif not filename.startswith('nvdiffrec_render-'):
-            continue
+            href_config = config_name_from_href(href)
+            if href_config and config_name and href_config != config_name:
+                continue
+            expected = href_config or config_name
+            if expected and local_tag_error(filename, expected):
+                continue
         match = re.search(r'-(linux_x86_64|win_amd64)\.whl$', filename)
         if match:
             tags.add(match.group(1))
@@ -321,7 +358,7 @@ def discover_configs(wheels_dir: Path) -> List[dict]:
             except (OSError, UnicodeDecodeError):
                 continue
             # No wheel href means pip cannot install from this page.
-            tags = installable_platforms(page)
+            tags = installable_platforms(page, config_dir.name)
             if tags is None:
                 continue
             config['platforms'] = tags
