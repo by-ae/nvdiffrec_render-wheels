@@ -339,8 +339,9 @@ class ReadmeCompatibilityTest(unittest.TestCase):
         for path in sorted(WHEELS.rglob("index.html")):
             parser = validate_index.IndexHTMLParser()
             parser.feed(path.read_text(encoding="utf-8"))
+            page_config = "" if path.parent == WHEELS else path.parent.name
             for href in parser.links:
-                message = validate_index.wheel_href_error(href)
+                message = validate_index.wheel_link_error(href, page_config)
                 if message:
                     errors.append(f"{path}: {message}")
         self.assertEqual(errors, [])

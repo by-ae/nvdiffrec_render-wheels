@@ -69,6 +69,29 @@ class WorkflowWrapperTest(unittest.TestCase):
             self.assertNotIn("_C.xfm_points", text, path.name)
             self.assertNotIn("Patch ops.py", text, path.name)
 
+    def test_windows_torch_29_defines_use_cuda_and_workflows_do_not_rewrite_the_header(self):
+        """PyTorch 2.9 compiles compiled_autograd.h's std::string branch unless USE_CUDA is set.
+
+        The cu128 workflow rewrote that header in site-packages. A setup.py
+        build never did, so the same MSVC error comes back on the next Windows
+        torch 2.9 build that skips the rewrite.
+        """
+        setup = load_setup()
+        windows_29 = setup.extension_compile_args("nt", "2.9.1+cu128")
+        self.assertIn("-DUSE_CUDA", windows_29["cxx"])
+        self.assertIn("-DUSE_CUDA", windows_29["nvcc"])
+        self.assertIn("-DUSE_CUDA", setup.extension_compile_args("nt", "2.9.0")["cxx"])
+        self.assertIn("-DUSE_CUDA", setup.extension_compile_args("nt", "2.10.0")["nvcc"])
+        self.assertNotIn("-DUSE_CUDA", setup.extension_compile_args("nt", "2.8.0")["cxx"])
+        self.assertNotIn("-DUSE_CUDA", setup.extension_compile_args("posix", "2.9.1")["nvcc"])
+        self.assertNotIn("-DUSE_CUDA", setup.extension_compile_args("nt", "2.5.1")["cxx"])
+        with self.assertRaises(SystemExit):
+            setup.extension_compile_args("nt", "not-a-version")
+        for path in sorted(WORKFLOWS.glob("build-cu*-torch*.yml")):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("compiled_autograd.h", text, path.name)
+            self.assertNotIn("StringType::get", text, path.name)
+
 
 if __name__ == "__main__":
     unittest.main()

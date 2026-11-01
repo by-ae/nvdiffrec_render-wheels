@@ -392,13 +392,41 @@ class _ImageLoss(torch.autograd.Function):
         )
 
 
+_IMAGE_LOSSES = ("l1", "mse", "smape", "relmse")
+_TONEMAPPERS = ("none", "log_srgb")
+
+
+def _require_image_loss(loss, tonemapper):
+    """Reject a name the kernel would silently change.
+
+    ``strToLoss`` in torch_bindings.cpp returns L1 for every other string,
+    and any tonemapper other than ``log_srgb`` is skipped. The PyTorch
+    fallback in loss.py does the same. A typo then trains against a
+    different objective.
+    """
+    if loss not in _IMAGE_LOSSES:
+        allowed = ", ".join(_IMAGE_LOSSES)
+        raise ValueError(
+            f"image_loss loss must be one of {allowed}; got {loss!r}. "
+            "Any other name is treated as l1."
+        )
+    if tonemapper not in _TONEMAPPERS:
+        allowed = ", ".join(_TONEMAPPERS)
+        raise ValueError(
+            f"image_loss tonemapper must be one of {allowed}; got {tonemapper!r}. "
+            "Any other name is treated as none."
+        )
+
+
 def image_loss(img, target, loss="l1", tonemapper="none", use_python=False):
     """HDR image loss reduced to a scalar.
 
     ``loss`` is ``l1``, ``mse``, ``smape``, or ``relmse``. ``tonemapper`` is
-    ``none`` or ``log_srgb``. The compiled kernel returns a per-pixel map;
-    this divides the sum by batch, height, and width.
+    ``none`` or ``log_srgb``. Any other name raises ValueError. The compiled
+    kernel returns a per-pixel map; this divides the sum by batch, height,
+    and width.
     """
+    _require_image_loss(loss, tonemapper)
     if use_python:
         from .loss import image_loss_fn
         out = image_loss_fn(img, target, loss, tonemapper)

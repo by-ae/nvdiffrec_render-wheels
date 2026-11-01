@@ -95,6 +95,23 @@ class TestIndexHTMLParser(unittest.TestCase):
         href = "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-linux_x86_64.whl#md5=abcd"
         error = validate_index.wheel_href_error(href)
         self.assertIn("hash fragment", error)
+
+    def test_local_tag_drops_the_patch_the_way_the_wheel_name_does(self):
+        """Directory torch291 is PyTorch 2.9.1. The wheel label keeps 2.9 only."""
+        self.assertEqual(validate_index.expected_local_tag("cu128-torch291"), "cu128torch29")
+        self.assertEqual(validate_index.expected_local_tag("cu124-torch251"), "cu124torch25")
+        self.assertEqual(validate_index.expected_local_tag("cu126-torch260"), "cu126torch26")
+        self.assertEqual(validate_index.expected_local_tag("cu130-torch2150"), "cu130torch215")
+        self.assertEqual(validate_index.expected_local_tag("cu1210-torch2100"), "cu1210torch210")
+        self.assertIsNone(validate_index.expected_local_tag("not-a-config"))
+        wrong = "nvdiffrec_render-0.0.1+cu126torch26-cp310-cp310-linux_x86_64.whl"
+        error = validate_index.local_tag_error(wrong, "cu128-torch291")
+        self.assertIn("cu126torch26", error)
+        self.assertIn("cu128torch29", error)
+        self.assertEqual(validate_index.local_tag_error(
+            "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-win_amd64.whl",
+            "cu128-torch291",
+        ), "")
     
     def test_parse_subdirectory_links(self):
         """Test parsing subdirectory links from HTML."""
@@ -140,6 +157,23 @@ class TestSubindexValidation(unittest.TestCase):
         errors, warnings = validate_index.validate_subindex(index_path)
         
         self.assertEqual(len(errors), 0, f"Unexpected errors: {errors}")
+
+    def test_wheel_from_another_config_is_rejected(self):
+        """A cu126 file on the cu128 page installs a build that will not import."""
+        config = Path(self.test_dir) / "cu128-torch291"
+        config.mkdir()
+        index_path = config / "index.html"
+        other = "nvdiffrec_render-0.0.1+cu126torch26-cp310-cp310-linux_x86_64.whl"
+        index_path.write_text(
+            "<!DOCTYPE html><html><body>"
+            f'<a href="https://github.com/by-ae/nvdiffrec_render-wheels/releases/download/cu128-torch291/{other}">{other}</a>'
+            "</body></html>",
+            encoding="utf-8",
+        )
+        errors, _warnings = validate_index.validate_subindex(index_path)
+        self.assertTrue(errors, errors)
+        self.assertIn("cu126torch26", errors[0])
+        self.assertIn("cu128torch29", errors[0])
     
     def test_missing_index(self):
         """Test validation of missing index file."""
@@ -225,6 +259,20 @@ class TestTopIndexValidation(unittest.TestCase):
         # External link should not cause errors
         self.assertEqual(len(errors), 0)
 
+    def test_root_wheel_from_another_config_is_rejected(self):
+        index_path = Path(self.test_dir) / "index.html"
+        other = "nvdiffrec_render-0.0.1+cu126torch26-cp310-cp310-linux_x86_64.whl"
+        index_path.write_text(
+            "<html><body>"
+            '<a href="cu128-torch291/">cu128-torch291</a>'
+            '<a href="cu126-torch280/">cu126-torch280</a>'
+            f'<a href="https://example.com/releases/download/cu128-torch291/{other}">{other}</a>'
+            "</body></html>",
+            encoding="utf-8",
+        )
+        errors, _warnings = validate_index.validate_top_index(index_path, Path(self.test_dir))
+        self.assertTrue(any("cu126torch26" in error for error in errors), errors)
+
 
 class TestConsoleEncoding(unittest.TestCase):
     def test_summary_is_printable_on_cp1252(self):
@@ -238,6 +286,19 @@ class TestConsoleEncoding(unittest.TestCase):
         stdout.flush()
         text = raw.getvalue().decode("cp1252")
         self.assertIn("valid", text.lower())
+
+
+class PagesDeployTest(unittest.TestCase):
+    def test_pages_deploy_validates_the_index_before_upload(self):
+        """Deploy and the config check start together, so a bad index can go live.
+
+        The deploy job has to fail on the same validator before it uploads.
+        """
+        workflow = Path(__file__).resolve().parent / ".github" / "workflows" / "deploy-pages.yml"
+        text = workflow.read_text(encoding="utf-8")
+        validate_at = text.index("python3 validate_index.py wheels/")
+        self.assertLess(text.index("python3 generate_root_index.py"), validate_at)
+        self.assertLess(validate_at, text.index("actions/upload-pages-artifact"))
 
 
 if __name__ == '__main__':

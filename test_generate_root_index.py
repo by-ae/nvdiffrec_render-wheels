@@ -81,6 +81,19 @@ class BuildHtmlTest(unittest.TestCase):
         self.assertNotIn(DOUBLED, html)
         self.assertIn("<code>0.0.1+cu130torch215</code>", html)
 
+    def test_wheel_from_another_config_is_omitted(self):
+        wrong = "nvdiffrec_render-0.0.1+cu126torch26-cp310-cp310-win_amd64.whl"
+        right = "nvdiffrec_render-0.0.1+cu128torch29-cp310-cp310-linux_x86_64.whl"
+        self.write_config(
+            "cu128-torch291",
+            config_page((wrong, wrong), (right, right)),
+        )
+        html = generate_root_index.build_html(self.wheels)
+        self.assertIn(right, html)
+        self.assertNotIn(wrong, html)
+        self.assertIn("linux_x86_64", html)
+        self.assertNotIn("win_amd64", html)
+
     def test_linux_only_newer_release_does_not_hide_the_windows_file(self):
         """Pip filters on the platform tag before it compares versions."""
         linux_130 = "nvdiffrec_render-0.0.1+cu130torch29-cp310-cp310-linux_x86_64.whl"
