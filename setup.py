@@ -4,6 +4,7 @@ This builds the render utilities from NVlabs/nvdiffrec as a standalone package.
 """
 from pathlib import Path
 import os
+import re
 import shutil
 
 from setuptools import setup
@@ -11,6 +12,34 @@ from setuptools import setup
 
 PACKAGE_NAME = "nvdiffrec_render"
 WRAPPER_FILENAME = "renderutils_ops.py"
+
+
+def windows_needs_use_cuda(torch_version):
+    """True when this PyTorch build rejects compiled_autograd.h without USE_CUDA.
+
+    The v2.9.1 header skips the ``::std::string`` if-constexpr branch only
+    when ``defined(_WIN32) && (defined(USE_CUDA) || defined(USE_ROCM))``.
+    A downstream extension does not define USE_CUDA, and MSVC then reports
+    C2872 (ambiguous ``std``) while compiling torch_bindings.cpp. v2.8.0
+    still skips the branch for every Windows compile (``#ifdef _WIN32``),
+    so older builds stay as they were.
+    https://github.com/pytorch/pytorch/issues/166123
+    """
+    base = torch_version.split("+", 1)[0]
+    match = re.match(r"^(\d+)\.(\d+)", base)
+    if not match:
+        raise SystemExit(f"Cannot read PyTorch version: {torch_version}")
+    return (int(match.group(1)), int(match.group(2))) >= (2, 9)
+
+
+def extension_compile_args(os_name, torch_version):
+    """Flags for nvdiffrec_render.renderutils._C."""
+    cxx = ["-O3", "-DNVDR_TORCH"]
+    nvcc = ["-O3", "-DNVDR_TORCH"]
+    if os_name == "nt" and windows_needs_use_cuda(torch_version):
+        cxx.append("-DUSE_CUDA")
+        nvcc.append("-DUSE_CUDA")
+    return {"cxx": cxx, "nvcc": nvcc}
 
 
 def prepare_package_tree(package_root, wrapper_path):
@@ -45,6 +74,7 @@ def prepare_package_tree(package_root, wrapper_path):
 
 
 def main():
+    import torch
     from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
     root = Path(__file__).resolve().parent
@@ -84,10 +114,7 @@ def main():
             CUDAExtension(
                 name='nvdiffrec_render.renderutils._C',
                 sources=cuda_sources,
-                extra_compile_args={
-                    'cxx': ['-O3', '-DNVDR_TORCH'],
-                    'nvcc': ['-O3', '-DNVDR_TORCH'],
-                },
+                extra_compile_args=extension_compile_args(os.name, torch.__version__),
             ),
         ],
         cmdclass={'build_ext': BuildExtension},
