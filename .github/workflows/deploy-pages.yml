@@ -28,6 +28,9 @@ jobs:
       - name: Regenerate root index
         run: python3 generate_root_index.py
 
+      - name: Validate index HTML files
+        run: python3 validate_index.py wheels/
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 

@@ -288,5 +288,18 @@ class TestConsoleEncoding(unittest.TestCase):
         self.assertIn("valid", text.lower())
 
 
+class PagesDeployTest(unittest.TestCase):
+    def test_pages_deploy_validates_the_index_before_upload(self):
+        """Deploy and the config check start together, so a bad index can go live.
+
+        The deploy job has to fail on the same validator before it uploads.
+        """
+        workflow = Path(__file__).resolve().parent / ".github" / "workflows" / "deploy-pages.yml"
+        text = workflow.read_text(encoding="utf-8")
+        validate_at = text.index("python3 validate_index.py wheels/")
+        self.assertLess(text.index("python3 generate_root_index.py"), validate_at)
+        self.assertLess(validate_at, text.index("actions/upload-pages-artifact"))
+
+
 if __name__ == '__main__':
     unittest.main()
