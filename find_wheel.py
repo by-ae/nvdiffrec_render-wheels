@@ -2,8 +2,9 @@
 """
 Helper script to find the correct nvdiffrec_render wheel for your environment.
 Detects Python version, PyTorch version, and CUDA version, then prints an
-install command only when both match a published config and this machine
-uses a platform tag that config publishes. A wheel built for a different
+install command only when both match a published config, this machine
+uses a platform tag that config publishes, and a wheel link for that
+platform carries this Python tag. A wheel built for a different
 PyTorch, CUDA, or platform tag will not install. A .dev, rc, or alpha
 PyTorch is not the final release it starts with. A ROCm or XPU build is
 not a CUDA build.
@@ -113,7 +114,7 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
     <tr><td>CUDA</td><td>PyTorch</td><td>Python</td><td><a href="cuXXX-torchYYY/">...</a></td></tr>
     """
     configs = []
-    platforms = platforms_by_config(html)
+    platforms, pythons = platforms_by_config(html)
     
     # Find all table rows with config links
     # Pattern: <tr><td>13.0</td><td>2.9.1</td><td>3.10-3.13</td><td><a href="cu130-torch291/">cu130-torch291</a></td></tr>
@@ -144,6 +145,9 @@ def parse_configs_from_index_html(html: str) -> List[dict]:
             config_platforms = platforms.get(config_name)
             if config_platforms:
                 config['platforms'] = config_platforms
+            config_pythons = pythons.get(config_name)
+            if config_pythons:
+                config['python_tags'] = config_pythons
             
             configs.append(config)
             
@@ -170,15 +174,37 @@ def _wheel_link_helpers():
     return wheel_href_error, config_name_from_href, local_tag_error
 
 
-def platforms_by_config(html: str) -> dict:
-    """Map a config name to the platform tags linked from an index page.
+def python_tag_from_wheel(filename: str) -> Optional[Tuple[int, int]]:
+    """Return (3, 11) from a ``cp311`` wheel tag, or None."""
+    match = re.search(r'-cp(3)(\d+)-', filename)
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2)))
+
+
+def _remember_wheel_tag(platforms: Set[str], pythons: dict, filename: str) -> None:
+    tag_match = re.search(r'-(linux_x86_64|win_amd64)\.whl$', filename)
+    if not tag_match:
+        return
+    platform_tag = tag_match.group(1)
+    platforms.add(platform_tag)
+    version = python_tag_from_wheel(filename)
+    if version:
+        pythons.setdefault(platform_tag, set()).add(version)
+
+
+def platforms_by_config(html: str):
+    """Map a config name to platform tags and to Python tags per platform.
 
     Root-index wheel URLs look like ``.../cu128-torch291/name-linux_x86_64.whl``.
     A doubled-tag name or a file whose local version belongs to another
     config is not a platform pip can install, so it does not count.
+    The table's Python range mixes every platform; the cp tag on each
+    file is what this machine can actually install.
     """
     helpers = _wheel_link_helpers()
     found = {}
+    pythons = {}
     for href in re.findall(r'href="([^"]*)"', html):
         path = href.partition('#')[0]
         filename = path.rsplit('/', 1)[-1]
@@ -196,10 +222,12 @@ def platforms_by_config(html: str) -> dict:
                 continue
         if not config:
             continue
-        tag_match = re.search(r'-(linux_x86_64|win_amd64)\.whl$', filename)
-        if tag_match:
-            found.setdefault(config, set()).add(tag_match.group(1))
-    return found
+        _remember_wheel_tag(
+            found.setdefault(config, set()),
+            pythons.setdefault(config, {}),
+            filename,
+        )
+    return found, pythons
 
 
 def host_wheel_platform(system: str, machine: str) -> Optional[str]:
@@ -233,16 +261,56 @@ def platform_refusal(host_platform: Optional[str], config: dict) -> Optional[str
     return None
 
 
-def installable_platforms(page: str, config_name: str = "") -> Optional[Set[str]]:
-    """Platform tags of wheel links on a config index page.
+def nondefault_abi_flags() -> str:
+    """ABI flags that make pip reject a default ``cpXY-cpXY`` wheel.
 
-    Returns None when the page has no wheel href pip could install. A
-    directory named like a config is not enough: cu130-torch291 publishes
+    Unix reports them on ``sys.abiflags`` (``t`` free-threaded, ``d``
+    debug). Windows does not set that attribute; ``Py_GIL_DISABLED`` is
+    the config var the free-threaded Windows build uses instead.
+    """
+    flags = getattr(sys, "abiflags", "") or ""
+    if flags:
+        return flags
+    import sysconfig
+    value = sysconfig.get_config_var("Py_GIL_DISABLED")
+    if str(value) == "1":
+        return "t"
+    return ""
+
+
+def python_tag_refusal(python_version, host_platform, config, abi_flags: str) -> Optional[str]:
+    """Return an explanation when this interpreter has no file on the page."""
+    if abi_flags:
+        return (
+            f"This interpreter's ABI flags are {abi_flags!r}.\n"
+            "Published wheels use the default cp tag (for example cp313-cp313), "
+            "and pip will not install them for this interpreter."
+        )
+    tags = config.get("python_tags")
+    if not host_platform or not tags:
+        return None
+    available = tags.get(host_platform)
+    if not available or python_version in available:
+        return None
+    listed = ", ".join(f"{major}.{minor}" for major, minor in sorted(available))
+    return (
+        f"{config['name']} has no {host_platform} wheel for Python "
+        f"{python_version[0]}.{python_version[1]}.\n"
+        f"Published Python versions for that platform: {listed}"
+    )
+
+
+def installable_platforms(page: str, config_name: str = ""):
+    """Platform tags, and Python tags per platform, on a config index page.
+
+    Returns (None, {}) when the page has no wheel href pip could install.
+    A directory named like a config is not enough: cu130-torch291 publishes
     an index that says no wheels. A file whose local version belongs to
     another config is not installable from this directory either.
     """
     helpers = _wheel_link_helpers()
     tags = set()
+    pythons = {}
     for href in re.findall(r'href="([^"]*)"', page):
         path = href.partition('#')[0]
         if not path.endswith('.whl'):
@@ -261,12 +329,10 @@ def installable_platforms(page: str, config_name: str = "") -> Optional[Set[str]
             expected = href_config or config_name
             if expected and local_tag_error(filename, expected):
                 continue
-        match = re.search(r'-(linux_x86_64|win_amd64)\.whl$', filename)
-        if match:
-            tags.add(match.group(1))
+        _remember_wheel_tag(tags, pythons, filename)
     if not tags:
-        return None
-    return tags
+        return None, {}
+    return tags, pythons
 
 
 def wheels_dir_for_script(script_file: Optional[str]) -> Optional[Path]:
@@ -360,10 +426,12 @@ def discover_configs(wheels_dir: Path) -> List[dict]:
             except (OSError, UnicodeDecodeError):
                 continue
             # No wheel href means pip cannot install from this page.
-            tags = installable_platforms(page, config_dir.name)
+            tags, pythons = installable_platforms(page, config_dir.name)
             if tags is None:
                 continue
             config['platforms'] = tags
+            if pythons:
+                config['python_tags'] = pythons
         configs.append(config)
     
     # Sort by PyTorch version (descending), then CUDA version (descending)
@@ -733,6 +801,14 @@ Examples:
             sys.exit(1)
         
         refusal = platform_refusal(host_platform, exact_match)
+        if refusal:
+            print(refusal)
+            print()
+            sys.exit(1)
+
+        running_python = (sys.version_info.major, sys.version_info.minor)
+        abi_flags = nondefault_abi_flags() if python_version == running_python else ""
+        refusal = python_tag_refusal(python_version, host_platform, exact_match, abi_flags)
         if refusal:
             print(refusal)
             print()
