@@ -4,7 +4,9 @@ Helper script to find the correct nvdiffrec_render wheel for your environment.
 Detects Python version, PyTorch version, and CUDA version, then prints an
 install command only when both match a published config and this machine
 uses a platform tag that config publishes. A wheel built for a different
-PyTorch, CUDA, or platform tag will not install.
+PyTorch, CUDA, or platform tag will not install. A .dev, rc, or alpha
+PyTorch is not the final release it starts with. A ROCm or XPU build is
+not a CUDA build.
 """
 import sys
 import os
@@ -32,43 +34,43 @@ def _print(line=""):
 
 def parse_version(version_str: str) -> Tuple[int, int, int]:
     """
-    Parse a version string like '2.9.1' or '2.9.1+cu128' into (major, minor, patch).
-    Strips local version suffixes (everything after +).
+    Parse a final release like '2.9.1' or '2.9.1+cu128' into (major, minor, patch).
+
+    The local label after '+' is ignored. A suffix on the release itself
+    ('.dev', 'rc', 'a') is rejected: that build is not the wheel's PyTorch.
     """
-    # Strip local version suffix (e.g., +cu128)
     base_version = version_str.split('+')[0]
-    
-    # Parse major.minor.patch
-    match = re.match(r'^(\d+)\.(\d+)\.(\d+)', base_version)
+    match = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', base_version)
     if not match:
         raise ValueError(f"Invalid version format: {version_str}")
-    
+
     major, minor, patch = match.groups()
     return (int(major), int(minor), int(patch))
 
 
 def parse_cuda_version(cuda_str: str) -> Tuple[int, int]:
     """
-    Parse CUDA version string like '12.8' or '128' into (major, minor).
-    Returns tuple for comparison.
+    Parse CUDA version string like '12.8', '12.8.1', or '128' into (major, minor).
+
+    Published configs are major.minor. The Windows CUDA 12.4 job installs
+    the 12.4.1 network installer, and that patch is the 12.4 row.
     """
     # Handle short form like '128' (12.8)
     if '.' not in cuda_str:
-        if len(cuda_str) == 3:  # e.g., '128' -> 12.8
+        if len(cuda_str) == 3 and cuda_str.isdigit():  # e.g., '128' -> 12.8
             major = int(cuda_str[:2])
             minor = int(cuda_str[2:])
-        elif len(cuda_str) == 4:  # e.g., '1308' -> 13.08 -> 13.8
+        elif len(cuda_str) == 4 and cuda_str.isdigit():  # e.g., '1308' -> 13.08 -> 13.8
             major = int(cuda_str[:2])
             minor = int(cuda_str[2:])
         else:
             raise ValueError(f"Invalid CUDA short version: {cuda_str}")
     else:
-        # Handle standard form like '12.8'
         parts = cuda_str.split('.')
-        if len(parts) != 2:
+        if len(parts) < 2 or not all(part.isdigit() for part in parts):
             raise ValueError(f"Invalid CUDA version format: {cuda_str}")
         major, minor = int(parts[0]), int(parts[1])
-    
+
     return (major, minor)
 
 
@@ -422,32 +424,49 @@ def find_matching_config(python_version: Tuple[int, int],
     return exact_match, nearest_match
 
 
-def detect_environment() -> Tuple[Tuple[int, int], Optional[Tuple[int, int, int]], Optional[Tuple[int, int]]]:
+def detect_environment():
     """
-    Detect Python version, PyTorch version, and CUDA version from the environment.
-    
-    Returns: (python_version, torch_version, cuda_version)
-    - python_version: always present as (major, minor)
-    - torch_version: (major, minor, patch) or None if torch not installed
-    - cuda_version: (major, minor) or None if torch not installed or CPU-only
+    Detect Python, PyTorch, and CUDA from the environment.
+
+    Returns (python_version, torch_version, cuda_version, kind, detail).
+    kind is "missing", "cuda", "cpu", "rocm", "xpu", "prerelease", or
+    "cuda-unparsed". torch_version is None when torch is missing or not a
+    final X.Y.Z release. detail is the raw string that explains kind.
     """
     python_version = (sys.version_info.major, sys.version_info.minor)
-    
-    torch_version = None
-    cuda_version = None
-    
+
     try:
         import torch
-        torch_version = parse_version(torch.__version__)
-        
-        # Check CUDA availability
-        if torch.version.cuda is not None:
-            cuda_version = parse_cuda_version(torch.version.cuda)
-        
     except ImportError:
-        pass
-    
-    return python_version, torch_version, cuda_version
+        return python_version, None, None, "missing", None
+
+    raw = getattr(torch, "__version__", "")
+    version_mod = getattr(torch, "version", None)
+    cuda_raw = getattr(version_mod, "cuda", None) if version_mod is not None else None
+    hip = getattr(version_mod, "hip", None) if version_mod is not None else None
+    xpu = getattr(version_mod, "xpu", None) if version_mod is not None else None
+
+    cuda_version = None
+    if cuda_raw:
+        try:
+            cuda_version = parse_cuda_version(str(cuda_raw))
+        except ValueError:
+            cuda_version = None
+
+    try:
+        torch_version = parse_version(raw)
+    except ValueError:
+        return python_version, None, cuda_version, "prerelease", raw
+
+    if cuda_version is not None:
+        return python_version, torch_version, cuda_version, "cuda", None
+    if cuda_raw:
+        return python_version, torch_version, None, "cuda-unparsed", str(cuda_raw)
+    if hip:
+        return python_version, torch_version, None, "rocm", str(hip)
+    if xpu:
+        return python_version, torch_version, None, "xpu", str(xpu)
+    return python_version, torch_version, None, "cpu", None
 
 
 def format_pip_command(config_name: str, base_url: str) -> str:
@@ -560,8 +579,9 @@ Examples:
         sys.exit(1)
     
     # Detect or parse environment
-    python_version, torch_version, cuda_version = detect_environment()
-    
+    python_version, torch_version, cuda_version, kind, detail = detect_environment()
+    prerelease_raw = detail if kind == "prerelease" else None
+
     # Override with command-line arguments
     if args.python:
         try:
@@ -577,6 +597,7 @@ Examples:
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
+        prerelease_raw = None
     
     if args.cuda:
         try:
@@ -594,22 +615,57 @@ Examples:
     else:
         print(f"  Platform: {platform.system()} {platform.machine()} (no published wheel)")
     
-    if torch_version:
+    if prerelease_raw:
+        print(f"  PyTorch: {prerelease_raw} (not a final release)")
+    elif torch_version:
         torch_str = f"{torch_version[0]}.{torch_version[1]}.{torch_version[2]}"
         print(f"  PyTorch: {torch_str}")
     else:
         print("  PyTorch: not installed (use --torch to specify)")
-    
+
     if cuda_version:
         cuda_str = format_cuda_version(cuda_version)
         print(f"  CUDA: {cuda_str}")
-    elif torch_version:
+    elif kind == "rocm":
+        print(f"  CUDA: none (ROCm/HIP {detail})")
+    elif kind == "xpu":
+        print(f"  CUDA: none (XPU {detail})")
+    elif kind == "cuda-unparsed":
+        print(f"  CUDA: {detail} (not a major.minor version)")
+    elif torch_version or prerelease_raw:
         print("  CUDA: CPU-only build detected")
-    
+
     print()
-    
-    # Handle CPU-only torch
+
+    if prerelease_raw:
+        print("This PyTorch build is not a final release.")
+        print("Wheels are compiled against a final major.minor.patch release.")
+        print("A .dev, rc, or alpha build will not load one of them.")
+        print("Pass --torch and --cuda to look up a final release instead.")
+        sys.exit(1)
+
+    # Handle a build that is not the CUDA wheel's PyTorch.
     if torch_version and not cuda_version and not args.cuda:
+        if kind == "rocm":
+            _print("❌ This PyTorch build is ROCm/HIP, not CUDA.")
+            print()
+            print(f"torch.version.hip is {detail}.")
+            print("nvdiffrec_render wheels are compiled for a CUDA PyTorch build.")
+            print("There is no install command for this build.")
+            print("Pass --torch and --cuda to look up a CUDA configuration.")
+            sys.exit(1)
+        if kind == "xpu":
+            _print("❌ This PyTorch build is XPU, not CUDA.")
+            print()
+            print(f"torch.version.xpu is {detail}.")
+            print("nvdiffrec_render wheels are compiled for a CUDA PyTorch build.")
+            print("There is no install command for this build.")
+            print("Pass --torch and --cuda to look up a CUDA configuration.")
+            sys.exit(1)
+        if kind == "cuda-unparsed":
+            print(f"torch.version.cuda is {detail!r}, which is not a major.minor CUDA version.")
+            print("Pass --cuda as major.minor (for example 12.8) to look up a config.")
+            sys.exit(1)
         _print("❌ Your PyTorch installation is CPU-only (no CUDA support).")
         print()
         print("nvdiffrec_render requires a CUDA-enabled PyTorch installation.")

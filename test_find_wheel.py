@@ -5,6 +5,7 @@ Tests version parsing, config discovery, matching logic, and integration scenari
 """
 import io
 import subprocess
+import types
 import unittest
 import tempfile
 import shutil
@@ -64,6 +65,20 @@ class TestVersionParsing(unittest.TestCase):
         
         with self.assertRaises(ValueError):
             find_wheel.parse_cuda_version('12')
+
+    def test_release_prefix_is_not_the_release(self):
+        """2.9.1.dev and 2.9.1rc1 are not the 2.9.1 wheel."""
+        for version in ('2.9.1.dev20251101+cu128', '2.9.1rc1', '2.9.1a0+githash'):
+            with self.assertRaises(ValueError):
+                find_wheel.parse_version(version)
+        self.assertEqual(find_wheel.parse_version('2.9.1+cu128'), (2, 9, 1))
+
+    def test_cuda_patch_is_the_minor_config(self):
+        """12.4.1 is the network installer the Windows 12.4 job downloads."""
+        self.assertEqual(find_wheel.parse_cuda_version('12.8.1'), (12, 8))
+        self.assertEqual(find_wheel.parse_cuda_version('12.4.1'), (12, 4))
+        with self.assertRaises(ValueError):
+            find_wheel.parse_cuda_version('12.8.beta')
 
     def test_parse_python_version(self):
         """A patch version is ignored; non-numeric text is an error."""
@@ -349,7 +364,7 @@ class TestDetectEnvironment(unittest.TestCase):
     @patch('sys.version_info', MagicMock(major=3, minor=11))
     def test_python_version_detection(self):
         """Test Python version is always detected."""
-        python_ver, torch_ver, cuda_ver = find_wheel.detect_environment()
+        python_ver, torch_ver, cuda_ver, kind, detail = find_wheel.detect_environment()
         
         self.assertEqual(python_ver, (3, 11))
     
@@ -358,18 +373,19 @@ class TestDetectEnvironment(unittest.TestCase):
     def test_torch_not_installed(self):
         """Test detection when torch is not installed."""
         with patch.dict('sys.modules', {'torch': None}):
-            python_ver, torch_ver, cuda_ver = find_wheel.detect_environment()
+            python_ver, torch_ver, cuda_ver, kind, detail = find_wheel.detect_environment()
             
             self.assertEqual(python_ver, (3, 12))
             self.assertIsNone(torch_ver)
             self.assertIsNone(cuda_ver)
+            self.assertEqual(kind, "missing")
     
     def test_torch_cuda_detection(self):
         """Test detection when torch is installed with CUDA (integration test)."""
         # This is an integration test - only runs if torch is actually installed
         try:
             import torch
-            python_ver, torch_ver, cuda_ver = find_wheel.detect_environment()
+            python_ver, torch_ver, cuda_ver, kind, detail = find_wheel.detect_environment()
             
             # Verify we get valid results
             self.assertIsInstance(python_ver, tuple)
@@ -377,6 +393,7 @@ class TestDetectEnvironment(unittest.TestCase):
             
             self.assertIsInstance(torch_ver, tuple)
             self.assertEqual(len(torch_ver), 3)
+            self.assertIn(kind, {"cuda", "cpu", "rocm", "xpu", "prerelease", "cuda-unparsed"})
             
             # CUDA version may be None (CPU build) or a tuple
             if cuda_ver is not None:
@@ -779,6 +796,62 @@ class TestInstallCommand(unittest.TestCase):
         result = self.run_finder("--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11.4")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cu128-torch291/", result.stdout)
+
+    def test_cuda_toolkit_patch_selects_the_minor_config(self):
+        result = self.run_finder("--torch", "2.5.1", "--cuda", "12.4.1", "--python", "3.11")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cu124-torch251/", result.stdout)
+        self.assertEqual(result.stdout.count("pip install"), 1)
+
+    def test_dev_torch_argument_exits_without_a_traceback(self):
+        result = self.run_finder("--torch", "2.9.1.dev20251101", "--cuda", "12.8")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("pip install", result.stdout)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+        self.assertIn("Invalid version format", result.stderr)
+
+    def _with_torch(self, version, cuda=None, hip=None, xpu=None):
+        module = types.ModuleType("torch")
+        module.__version__ = version
+        module.version = types.SimpleNamespace(cuda=cuda, hip=hip, xpu=xpu)
+        return patch.dict(sys.modules, {"torch": module})
+
+    def test_installed_dev_build_is_not_offered_the_release_wheel(self):
+        with self._with_torch("2.9.1.dev20251101+cu128", cuda="12.8"):
+            code, stdout, stderr = self._run_main([], "Linux", "x86_64")
+        self.assertEqual(code, 1, stderr)
+        self.assertNotIn("pip install", stdout)
+        self.assertNotIn("Traceback", stderr)
+        self.assertIn("2.9.1.dev20251101+cu128", stdout)
+        self.assertNotIn("CPU-only", stdout)
+
+    def test_explicit_release_still_matches_when_the_install_is_a_dev_build(self):
+        with self._with_torch("2.9.1.dev20251101+cu128", cuda="12.8"):
+            code, stdout, stderr = self._run_main(
+                ["--torch", "2.9.1", "--cuda", "12.8", "--python", "3.11"],
+                "Linux",
+                "x86_64",
+            )
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("cu128-torch291/", stdout)
+
+    def test_rocm_build_is_not_described_as_cpu_only(self):
+        with self._with_torch("2.5.1", hip="6.2.41134"):
+            code, stdout, stderr = self._run_main([], "Linux", "x86_64")
+        self.assertEqual(code, 1, stderr)
+        self.assertNotIn("pip install", stdout)
+        self.assertNotIn("CPU-only", stdout)
+        self.assertIn("6.2.41134", stdout)
+        self.assertIn("ROCm", stdout)
+
+    def test_xpu_build_is_not_described_as_cpu_only(self):
+        with self._with_torch("2.5.1", xpu="2025.1"):
+            code, stdout, stderr = self._run_main([], "Linux", "x86_64")
+        self.assertEqual(code, 1, stderr)
+        self.assertNotIn("pip install", stdout)
+        self.assertNotIn("CPU-only", stdout)
+        self.assertIn("2025.1", stdout)
+        self.assertIn("XPU", stdout)
 
     def test_piped_script_ignores_wheels_in_the_working_directory(self):
         script = (Path(__file__).resolve().parent / "find_wheel.py").read_text(encoding="utf-8")
