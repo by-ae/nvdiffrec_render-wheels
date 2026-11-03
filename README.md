@@ -73,7 +73,7 @@ Or run it directly from the repository without cloning:
 curl -sL https://raw.githubusercontent.com/by-ae/nvdiffrec_render-wheels/main/find_wheel.py | python
 ```
 
-The script auto-detects your Python, PyTorch, and CUDA versions. It prints an install command only when both match a published config. A nearby CUDA or PyTorch version is a different build, and that wheel will not import. If PyTorch isn't installed yet, specify your target versions manually:
+The script auto-detects your Python, PyTorch, and CUDA versions. It prints an install command only when both match a published config and a wheel link for this platform carries this Python's `cp` tag. The table's Python range is every platform combined, so a Windows interpreter is not offered a file that exists only for Linux. An interpreter whose ABI flags are not empty (`sys.abiflags` on Unix, or `Py_GIL_DISABLED` on Windows) is not offered a command either: published files use the default tag, such as `cp313-cp313`. A nearby CUDA or PyTorch version is a different build, and that wheel will not import. A `.dev`, `rc`, or alpha PyTorch version is not the final release it starts with, so the script prints no command for it. If `torch.version.cuda` is unset and `torch.version.hip` or `torch.version.xpu` is set, that build is not described as CPU-only; there is still no CUDA wheel. A trailing CUDA patch uses the major.minor row (`12.8.1` selects the 12.8 wheel). If PyTorch isn't installed yet, specify your target versions manually:
 
 ```bash
 python find_wheel.py --torch 2.9.1 --cuda 12.8 --python 3.11

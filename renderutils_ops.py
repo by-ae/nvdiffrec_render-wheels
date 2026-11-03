@@ -161,15 +161,26 @@ class _PrepareShadingNormal(torch.autograd.Function):
         )
 
 
+def _unperturbed_normal(like):
+    """Tangent-space +Z used when the caller passes no normal map.
+
+    Same device and dtype as the g-buffer. A float32 tensor on the default
+    CUDA device does not match a bfloat16 buffer, another device, or the
+    CPU fallback.
+    """
+    return torch.tensor(
+        [0, 0, 1], dtype=like.dtype, device=like.device, requires_grad=False,
+    )[None, None, None, ...]
+
+
 def prepare_shading_normal(pos, view_pos, perturbed_nrm, smooth_nrm, smooth_tng, geom_nrm, two_sided_shading=True, opengl=True, use_python=False):
     """Final shading normal. Tensors are [minibatch, height, width, 3], or broadcastable.
 
-    A missing ``perturbed_nrm`` is treated as an unperturbed tangent-space normal.
+    A missing ``perturbed_nrm`` is an unperturbed tangent-space normal on
+    ``pos``'s device and dtype.
     """
     if perturbed_nrm is None:
-        perturbed_nrm = torch.tensor(
-            [0, 0, 1], dtype=torch.float32, device="cuda", requires_grad=False,
-        )[None, None, None, ...]
+        perturbed_nrm = _unperturbed_normal(pos)
     if use_python:
         from .bsdf import bsdf_prepare_shading_normal
         out = bsdf_prepare_shading_normal(

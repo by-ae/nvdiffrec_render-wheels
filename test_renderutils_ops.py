@@ -183,6 +183,61 @@ class RenderutilsOpsTest(unittest.TestCase):
         self.assertEqual(len(grads), 2)
         self.assertTrue(all(isinstance(grad, FakeTensor) for grad in grads))
 
+    def test_missing_perturbed_normal_uses_the_gbuffer_device_and_dtype(self):
+        """None means an unperturbed normal, on the same device as pos.
+
+        A float32 tensor on cuda:0 does not match a bfloat16 g-buffer or
+        another CUDA device, and the CPU fallback cannot allocate it.
+        """
+        created = {}
+
+        def tensor(data, dtype=None, device=None, requires_grad=None):
+            created["data"] = data
+            created["dtype"] = dtype
+            created["device"] = device
+            created["requires_grad"] = requires_grad
+            return FakeTensor("nrm", shape=(3,))
+
+        sys.modules["torch"].tensor = tensor
+        pos = FakeTensor("pos")
+        pos.dtype = "bf16"
+        pos.device = "cuda:1"
+        self.ops.prepare_shading_normal(
+            pos, self.tensor, None, self.tensor, self.tensor, self.tensor,
+        )
+        self.assertEqual(created["data"], [0, 0, 1])
+        self.assertEqual(created["dtype"], "bf16")
+        self.assertEqual(created["device"], "cuda:1")
+        self.assertIs(created["requires_grad"], False)
+        self.assertEqual(self.plugin.calls[-1][0], "prepare_shading_normal_fwd")
+        self.assertIsInstance(self.plugin.calls[-1][1][2], FakeTensor)
+
+    def test_missing_perturbed_normal_on_cpu_uses_the_python_fallback(self):
+        created = {}
+
+        def tensor(data, dtype=None, device=None, requires_grad=None):
+            created["device"] = device
+            return FakeTensor("nrm", shape=(3,))
+
+        sys.modules["torch"].tensor = tensor
+        bsdf = types.ModuleType("nvdiffrec_render.renderutils.bsdf")
+
+        def fallback(*args, **kwargs):
+            return "python-normal"
+
+        bsdf.bsdf_prepare_shading_normal = fallback
+        sys.modules["nvdiffrec_render.renderutils.bsdf"] = bsdf
+        pos = FakeTensor("pos")
+        pos.dtype = "float32"
+        pos.device = "cpu"
+        result = self.ops.prepare_shading_normal(
+            pos, self.tensor, None, self.tensor, self.tensor, self.tensor,
+            use_python=True,
+        )
+        self.assertEqual(result, "python-normal")
+        self.assertEqual(created["device"], "cpu")
+        self.assertEqual(self.plugin.calls, [])
+
     def test_prepare_shading_normal_backward_covers_the_two_flags(self):
         args = (self.tensor,) * 6
         self.ops.prepare_shading_normal(*args, two_sided_shading=False, opengl=True)
